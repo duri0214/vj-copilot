@@ -12,8 +12,8 @@ apply: always
 - **Value Object**: 意味を持つ値を型で表し、生成時に不正値を拒否する。原則として不変に扱う。
 - **Domain Service**: 1つの Entity や Value Object に自然に属さず、ドメイン上の複数の概念にまたがる処理を担当する。
 - **Application Service / Use Case**: 入力を受け、ドメイン操作、トランザクション、外部境界の呼び出し順を調整する。ドメインの判断を重複して実装しない。
-- **Repository**: 集約の保存・取得を抽象化する。必要な場合だけ trait を定義し、具体実装は infrastructure 側に置く。
-- **Infrastructure**: DB、HTTP、ファイル、キュー、外部SDKなどの具体的な入出力を担当する。
+- **Repository**: 集約の保存・取得を抽象化する。trait は `src/domain/repository/` に置き、具体実装は `src/infra/` 側に置く。
+- **Infrastructure**: DB、HTTP、ファイル、キュー、外部SDKなどの具体的な入出力を `src/infra/` で担当する。
 
 ## Rust での表現
 
@@ -24,9 +24,29 @@ apply: always
 - Repository の trait は、ドメインまたは application が必要とする操作だけを表す。実装都合のメソッドを漏らさない。
 - 所有権・借用を理由なく `clone` で解決せず、データの所有者とライフサイクルを明確にする。
 
-## 構成
+## 基本配置
+
+ドメイン処理を追加するときは、まず `src/domain/` を作り、次の3領域へ基本的に分ける。
+
+```text
+src/
+├── domain/
+│   ├── valueobject/  # 意味と不変条件を持つ値
+│   ├── service/      # Entity や Value Object に属さないドメイン処理
+│   └── repository/   # 永続化・外部取得の trait
+└── infra/            # 外部I/Oの具体実装が必要な場合だけ追加
+```
+
+- `src/domain/valueobject/` には、検証済みの値と値に固有の振る舞いを置く。
+- `src/domain/service/` には、複数のドメイン概念にまたがる判断や計算を置く。
+- `src/domain/repository/` には、ドメインが必要とする保存・取得の境界だけを trait で定義する。
+- DB、HTTP、ファイル、キュー、外部SDKの具体実装は `src/infra/` に置き、domain から直接参照しない。
+- Use Case や Application Service が必要な複雑さがある場合だけ `src/application/` を追加する。
+- Entity / Aggregate を独立して管理する必要が明確な場合だけ、`src/domain/entity/` などの追加領域を作る。
+
+## 構成上の注意
 
 - モジュールは業務上の境界や責務を反映させ、`utils` のような無関係な処理の集積を作らない。
-- すべての機能に Entity、Service、Repository を作る必要はない。単純な処理は単純な関数や型で表す。
+- `src/domain/` を作っても、すべての機能に Entity、Service、Repository を作る必要はない。単純な処理は単純な関数や型で表す。
 - Use Case、Factory、イベント、CQRS などの追加構造は、具体的な複雑さを解消する場合だけ導入する。
 - ドメインから外部境界へ直接アクセスする実装や、application 層へ業務ルールを重複させる実装をレビューで確認する。
