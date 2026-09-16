@@ -3,6 +3,9 @@ mod infra;
 mod launch;
 mod ui;
 
+#[cfg(windows)]
+use std::{fs, path::PathBuf};
+
 use eframe::egui;
 
 use crate::{
@@ -35,8 +38,50 @@ fn main() {
     if let Err(error) = eframe::run_native(
         "VJ Copilot",
         native_options,
-        Box::new(move |_creation_context| Ok(Box::new(VjApp::new(app_config)))),
+        Box::new(move |creation_context| {
+            install_japanese_font(&creation_context.egui_ctx);
+            Ok(Box::new(VjApp::new(app_config)))
+        }),
     ) {
         eprintln!("アプリを起動できませんでした: {error}");
     }
+}
+
+fn install_japanese_font(context: &egui::Context) {
+    let Some(font_bytes) = japanese_font_bytes() else {
+        return;
+    };
+
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "windows-japanese".to_owned(),
+        std::sync::Arc::new(egui::FontData::from_owned(font_bytes)),
+    );
+
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        if let Some(font_names) = fonts.families.get_mut(&family) {
+            font_names.push("windows-japanese".to_owned());
+        }
+    }
+
+    context.set_fonts(fonts);
+}
+
+#[cfg(windows)]
+fn japanese_font_bytes() -> Option<Vec<u8>> {
+    let windows_dir = std::env::var_os("WINDIR").map(PathBuf::from)?;
+    [
+        "Fonts\\NotoSansJP-VF.ttf",
+        "Fonts\\YuGothR.ttc",
+        "Fonts\\meiryo.ttc",
+        "Fonts\\msgothic.ttc",
+    ]
+    .iter()
+    .map(|relative_path| windows_dir.join(relative_path))
+    .find_map(|path| fs::read(path).ok())
+}
+
+#[cfg(not(windows))]
+fn japanese_font_bytes() -> Option<Vec<u8>> {
+    None
 }
