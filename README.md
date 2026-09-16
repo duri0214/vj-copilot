@@ -37,6 +37,22 @@ cargo run --release -- --media-dir .\demo-media
 cargo run --release -- --media-dir .\demo-media --demo
 ```
 
+## リリース exe の作成と直接起動
+
+`cargo run --release` は、ソースや依存関係に変更がある場合だけリビルドし、完了後にアプリを起動します。exe だけを作成する場合は、次を実行します。
+
+```powershell
+cargo build --release
+```
+
+リポジトリ直下の `target\release\vj-copilot.exe` が作成されます。以後は Cargo を経由せず、exe を直接起動できます。
+
+```powershell
+.\target\release\vj-copilot.exe --media-dir .\demo-media
+```
+
+デモ入力を使う場合は、起動引数に `--demo` を追加します。相対パスを使うため、コマンドはリポジトリ直下で実行してください。ショートカットやバッチファイルから起動する場合も、作業フォルダをリポジトリ直下に設定します。
+
 ## 操作
 
 - 入力デバイスを選び、「開始」／「停止」でキャプチャを切り替えます。mono と stereo の f32/i16/u16 PCM に対応し、stereo は mono に平均します。
