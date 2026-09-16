@@ -13,7 +13,7 @@
 
 ## ルールの使い分け
 
-- 常に適用する設計・運用方針: `.codex/rules/kiss.md`、`.codex/rules/project.md`、`.codex/rules/ddd.md`
+- 常に適用する設計・運用方針: `.codex/rules/principles.md`、`.codex/rules/project.md`、`.codex/rules/ddd.md`
 - Rust のコード: `.codex/rules/rust.md`
 - Rust のテスト: `.codex/rules/testing.md`
 
