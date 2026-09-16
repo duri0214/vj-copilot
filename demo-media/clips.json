@@ -1,0 +1,10 @@
+[
+  { "file": "low_dark_01.mp4", "energy": 0.2, "brightness": 0.2 },
+  { "file": "low_dark_02.mp4", "energy": 0.2, "brightness": 0.2 },
+  { "file": "low_bright_01.mp4", "energy": 0.2, "brightness": 0.8 },
+  { "file": "low_bright_02.mp4", "energy": 0.2, "brightness": 0.8 },
+  { "file": "high_dark_01.mp4", "energy": 0.8, "brightness": 0.2 },
+  { "file": "high_dark_02.mp4", "energy": 0.8, "brightness": 0.2 },
+  { "file": "high_bright_01.mp4", "energy": 0.8, "brightness": 0.8 },
+  { "file": "high_bright_02.mp4", "energy": 0.8, "brightness": 0.8 }
+]
