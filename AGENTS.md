@@ -10,6 +10,8 @@
 - Rust のコード変更では、対象範囲に応じて `cargo fmt`、`cargo test`、`cargo clippy` を実行する。
 - GitHub の Issue、Project、PR、レビューコメントの操作には `gh` CLI を使う。
 - ルールやスキル自体を変更するときも、通常の Issue、ブランチ、確認、コミット、PR の流れに従う。
+- コード、ルール、ドキュメントを変更する依頼では、確認後に commit、push、PR作成または更新まで進める。ユーザーが `commit不要`、`push不要`、`PR不要`、`まだコミットしない` と明示した場合だけ停止する。
+- 説明、調査、レビュー結果の報告、状態確認だけを求められた場合は、変更や commit、push、PR作成を行わない。
 
 ## ルールの使い分け
 
@@ -50,7 +52,7 @@
 
    `Cargo.toml` がないルール・ドキュメントだけの変更では、`git diff --check` を実行する。
 4. `git diff --stat`、`git diff --check`、`git diff` で Issue に関係する差分だけであることを確認する。
-5. 問題がなければ、内容が分かる短いメッセージでコミットし、push する。
+5. 問題がなければ、内容が分かる短いメッセージでコミットし、push する。変更依頼に対しては、明示的な停止指定がない限り確認待ちで止めない。
 6. `git commit --amend`、`git push --force`、`git push --force-with-lease` は、明示的な許可なしに使わない。
 
 ### PR 作成
@@ -60,6 +62,6 @@
 3. `git diff --stat origin/<base>..HEAD`、`git diff --name-status origin/<base>..HEAD` でPRの差分を確認する。
 4. PR本文は日本語で、概要、主な変更点、目検手順、自動テストの範囲、`Closes #<Issue番号>` を含める。
 5. 目検手順は操作と期待値を `- [ ]` 形式で書く。実行していない確認を `[x]` にしない。
-6. `gh pr create --base <base> --head <current-branch> --title "#<Issue番号> <Issueタイトル>" --body-file <body-file>` で作成し、作成後に URL、assignee、ラベル、Project を確認する。
+6. `gh pr create --base <base> --head <current-branch> --title "#<Issue番号> <Issueタイトル>" --body-file <body-file>` で作成し、作成後に URL、assignee、ラベル、Project を確認する。変更依頼に対しては、明示的な `PR不要` 指定がない限り作成または更新まで進める。
 
 git や gh の操作が失敗した場合は、API で迂回せず原因を切り分けて報告する。Project 操作の権限が不足する場合は、`gh auth refresh -s read:project -s project` が必要であることを伝える。
