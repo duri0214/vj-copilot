@@ -605,7 +605,16 @@ impl eframe::App for VjApp {
         self.level_meter.update(self.latest_levels, now);
 
         egui::CentralPanel::default()
-            .frame(Frame::new().fill(theme::BACKGROUND).inner_margin(20))
+            .frame(
+                Frame::new()
+                    .fill(theme::BACKGROUND)
+                    .inner_margin(egui::Margin {
+                        left: 20,
+                        right: 0,
+                        top: 20,
+                        bottom: 20,
+                    }),
+            )
             .show(context, |ui| {
                 let scroll_area = egui::ScrollArea::vertical().auto_shrink([false, true]);
                 scroll_area.show(ui, |ui| {
