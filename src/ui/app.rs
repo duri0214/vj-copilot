@@ -484,7 +484,7 @@ impl VjApp {
             None => "音声待機中 — 音源の再生とデバイスを確認してください",
             Some(reading) if !reading.audible => "無音を検出: 候補を保持中",
             Some(_) if self.latest_search_features.is_none() => "有音入力を 1 秒分待機中",
-            Some(_) if self.candidates.is_held() => "候補更新を保留中",
+            Some(_) if self.candidates.is_held() => "候補を固定中",
             Some(_) => "候補を自動更新中",
         }
     }
@@ -494,10 +494,13 @@ impl VjApp {
             theme::caption(ui, "02 / CLIP CANDIDATES");
             theme::badge(ui, &format!("{} CLIPS", self.library.len()), theme::MUTED);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let button_text = if self.candidates.is_held() {
-                    "HOLD / 解除"
+                let (button_text, tooltip) = if self.candidates.is_held() {
+                    (
+                        "自動更新を再開",
+                        "候補の固定を解除して、自動更新を再開します。選択表示も解除します。",
+                    )
                 } else {
-                    "AUTO / 保留"
+                    ("候補を固定", "現在の候補を固定し、自動更新を停止します。")
                 };
                 let color = if self.candidates.is_held() {
                     theme::AMBER
@@ -506,7 +509,7 @@ impl VjApp {
                 };
                 if ui
                     .button(RichText::new(button_text).strong().color(color))
-                    .on_hover_text("Space で候補の自動更新を保留・解除")
+                    .on_hover_text(tooltip)
                     .clicked()
                 {
                     self.toggle_hold();
@@ -633,7 +636,7 @@ impl eframe::App for VjApp {
                     self.show_preview_grid(ui);
                     ui.add_space(4.0);
                     ui.label(
-                        RichText::new("1—4  選択     SPACE  保留 / 解除")
+                        RichText::new("1—4  選択     SPACE  候補固定 / 再開")
                             .monospace()
                             .size(11.0)
                             .color(theme::MUTED),
