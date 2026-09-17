@@ -56,6 +56,7 @@ impl FeatureVector {
 pub struct AnalysisReading {
     pub features: FeatureVector,
     pub rms_dbfs: f32,
+    pub peak_dbfs: f32,
     pub centroid_hz: f32,
     pub audible: bool,
 }

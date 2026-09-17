@@ -14,6 +14,36 @@ use cpal::{
 };
 const MAX_BUFFERED_SECONDS: usize = 2;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AudioSource {
+    #[cfg_attr(not(windows), default)]
+    LineInput,
+    #[cfg(windows)]
+    #[default]
+    SystemPlayback,
+}
+
+impl AudioSource {
+    fn devices(
+        self,
+        host: &cpal::Host,
+    ) -> Result<cpal::InputDevices<cpal::Devices>, cpal::DevicesError> {
+        match self {
+            Self::LineInput => host.input_devices(),
+            #[cfg(windows)]
+            Self::SystemPlayback => host.output_devices(),
+        }
+    }
+
+    fn default_device(self, host: &cpal::Host) -> Option<Device> {
+        match self {
+            Self::LineInput => host.default_input_device(),
+            #[cfg(windows)]
+            Self::SystemPlayback => host.default_output_device(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum InputStatus {
     Ready,
@@ -77,6 +107,7 @@ impl Error for AudioInputError {}
 
 pub struct AudioInput {
     host: cpal::Host,
+    source: AudioSource,
     device_names: Vec<String>,
     selected_device: Option<String>,
     stream: Option<Stream>,
@@ -94,6 +125,7 @@ impl AudioInput {
     pub fn new() -> Self {
         let mut input = Self {
             host: cpal::default_host(),
+            source: AudioSource::default(),
             device_names: Vec::new(),
             selected_device: None,
             stream: None,
@@ -107,6 +139,19 @@ impl AudioInput {
 
     pub fn device_names(&self) -> &[String] {
         &self.device_names
+    }
+
+    pub fn source(&self) -> AudioSource {
+        self.source
+    }
+
+    pub fn select_source(&mut self, source: AudioSource) {
+        if self.source != source {
+            self.stop();
+            self.source = source;
+            self.selected_device = None;
+            self.refresh_devices();
+        }
     }
 
     pub fn selected_device(&self) -> Option<&str> {
@@ -130,7 +175,7 @@ impl AudioInput {
     }
 
     pub fn refresh_devices(&mut self) {
-        let devices = match self.host.input_devices() {
+        let devices = match self.source.devices(&self.host) {
             Ok(devices) => devices,
             Err(error) => {
                 self.device_names.clear();
@@ -160,8 +205,8 @@ impl AudioInput {
             .is_some_and(|selected| device_names.contains(selected));
         if !selected_is_available {
             self.selected_device = self
-                .host
-                .default_input_device()
+                .source
+                .default_device(&self.host)
                 .and_then(|device| device.name().ok())
                 .filter(|name| device_names.contains(name))
                 .or_else(|| device_names.first().cloned());
@@ -207,9 +252,12 @@ impl AudioInput {
             .clone()
             .ok_or(AudioInputError::SelectedDeviceMissing)?;
         let device = self.find_device(&selected_device)?;
-        let supported_config = device
-            .default_input_config()
-            .map_err(AudioInputError::DefaultConfig)?;
+        let supported_config = match self.source {
+            AudioSource::LineInput => device.default_input_config(),
+            #[cfg(windows)]
+            AudioSource::SystemPlayback => device.default_output_config(),
+        }
+        .map_err(AudioInputError::DefaultConfig)?;
         let sample_format = supported_config.sample_format();
         let config: StreamConfig = supported_config.config();
         let channels = usize::from(config.channels);
@@ -288,8 +336,8 @@ impl AudioInput {
 
     fn find_device(&self, selected_name: &str) -> Result<Device, AudioInputError> {
         for device in self
-            .host
-            .input_devices()
+            .source
+            .devices(&self.host)
             .map_err(AudioInputError::Enumerate)?
         {
             let name = device.name().map_err(AudioInputError::DeviceName)?;
@@ -377,4 +425,39 @@ fn normalize_i16(sample: i16) -> f32 {
 
 fn normalize_u16(sample: u16) -> f32 {
     (sample as f32 / 32_767.5 - 1.0).clamp(-1.0, 1.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stereo_capture_averages_channels_before_analysis() {
+        let (sender, receiver) = sync_channel(4);
+        let dropped = AtomicUsize::new(0);
+        enqueue_mono_samples(&[0.8, 0.2, -0.6, 0.2], 2, &sender, &dropped, normalize_f32);
+        let samples: Vec<_> = receiver.try_iter().collect();
+        assert_eq!(samples.len(), 2);
+        assert!((samples[0] - 0.5).abs() < 0.0001);
+        assert!((samples[1] + 0.2).abs() < 0.0001);
+        assert_eq!(dropped.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn full_capture_buffer_drops_samples_without_blocking() {
+        let (sender, receiver) = sync_channel(1);
+        let dropped = AtomicUsize::new(0);
+        enqueue_mono_samples(&[0.25, 0.5, 0.75], 1, &sender, &dropped, normalize_f32);
+        assert_eq!(receiver.try_recv().unwrap(), 0.25);
+        assert_eq!(dropped.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn capture_normalizes_integer_pcm_and_rejects_non_finite_samples() {
+        assert_eq!(normalize_i16(i16::MIN), -1.0);
+        assert_eq!(normalize_u16(0), -1.0);
+        assert_eq!(normalize_u16(u16::MAX), 1.0);
+        assert_eq!(normalize_f32(f32::NAN), 0.0);
+        assert_eq!(normalize_f32(f32::INFINITY), 0.0);
+    }
 }

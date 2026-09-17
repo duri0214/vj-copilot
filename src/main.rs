@@ -30,8 +30,8 @@ fn main() {
     };
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([760.0, 720.0])
-            .with_min_inner_size([700.0, 620.0]),
+            .with_inner_size([640.0, 720.0])
+            .with_min_inner_size([540.0, 540.0]),
         ..Default::default()
     };
 
@@ -40,6 +40,7 @@ fn main() {
         native_options,
         Box::new(move |creation_context| {
             install_japanese_font(&creation_context.egui_ctx);
+            ui::theme::install(&creation_context.egui_ctx);
             Ok(Box::new(VjApp::new(app_config)))
         }),
     ) {

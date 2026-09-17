@@ -83,6 +83,7 @@ impl AudioFeatureTracker {
         AnalysisReading {
             features,
             rms_dbfs,
+            peak_dbfs: peak_dbfs(&self.interval),
             centroid_hz,
             audible: rms_dbfs > SILENCE_DBFS,
         }
@@ -119,6 +120,18 @@ impl AudioFeatureTracker {
             / count;
 
         Some(FeatureVector::from_clamped(energy, brightness))
+    }
+}
+
+fn peak_dbfs(samples: &[f32]) -> f32 {
+    let peak = samples
+        .iter()
+        .map(|sample| sanitize_sample(*sample).abs())
+        .fold(0.0_f32, f32::max);
+    if peak <= f32::EPSILON {
+        -120.0
+    } else {
+        20.0 * peak.log10()
     }
 }
 
@@ -227,6 +240,31 @@ mod tests {
             .features
             .energy();
         assert!((energy - 0.8997).abs() < 0.01);
+    }
+
+    #[test]
+    fn meter_preserves_a_short_full_scale_peak_despite_low_average_level() {
+        let mut tracker = AudioFeatureTracker::new(1_000);
+        tracker.push_sample(-1.0);
+        let mut tick = None;
+        for _ in 1..200 {
+            tick = tracker.push_sample(0.0);
+        }
+        let reading = tick.expect("one analysis interval").reading;
+        assert!(reading.peak_dbfs.abs() < 0.001);
+        assert!(reading.rms_dbfs < -20.0);
+    }
+
+    #[test]
+    fn silent_input_has_finite_levels_below_the_meter_floor() {
+        let mut tracker = AudioFeatureTracker::new(1_000);
+        let mut tick = None;
+        for _ in 0..200 {
+            tick = tracker.push_sample(0.0);
+        }
+        let reading = tick.expect("one analysis interval").reading;
+        assert!(reading.rms_dbfs.is_finite() && reading.rms_dbfs < -60.0);
+        assert!(reading.peak_dbfs.is_finite() && reading.peak_dbfs < -60.0);
     }
 
     #[test]

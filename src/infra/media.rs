@@ -181,7 +181,7 @@ pub fn load_media_directory(media_dir: Option<&Path>) -> MediaLoadReport {
     if candidates.is_empty() {
         report
             .notices
-            .push("有効な素材がありません。空き枠を表示します".to_owned());
+            .push("有効な素材がありません。Nothing を表示します".to_owned());
         return report;
     }
 
@@ -203,7 +203,7 @@ pub fn load_media_directory(media_dir: Option<&Path>) -> MediaLoadReport {
 
     if report.library.len() < 4 {
         report.notices.push(format!(
-            "有効素材は {} 本です。不足分は空き枠で表示します",
+            "有効素材は {} 本です。不足分は Nothing で表示します",
             report.library.len()
         ));
     }
