@@ -421,7 +421,11 @@ impl VjApp {
                 .tempo
                 .bpm
                 .map_or_else(|| "--".to_owned(), |bpm| format!("{bpm:.1}"));
-            ui.label(RichText::new(bpm).monospace().size(30.0).strong());
+            ui.add_sized(
+                Vec2::new(98.0, 38.0),
+                egui::Label::new(RichText::new(bpm).monospace().size(30.0).strong())
+                    .halign(egui::Align::RIGHT),
+            );
             theme::caption(ui, "BPM");
             let status = if self.latest_levels.is_none() {
                 "入力待ち"

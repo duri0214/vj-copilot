@@ -55,7 +55,10 @@ impl LevelMeter {
             let text = reading
                 .map(|reading| format!("{:.1} dBFS", reading.rms_dbfs))
                 .unwrap_or_else(|| "-- dBFS".to_owned());
-            ui.monospace(text);
+            ui.add_sized(
+                Vec2::new(96.0, 18.0),
+                egui::Label::new(egui::RichText::new(text).monospace()).halign(egui::Align::RIGHT),
+            );
             if self
                 .clip_at
                 .is_some_and(|at| now.saturating_duration_since(at) < PEAK_HOLD)
