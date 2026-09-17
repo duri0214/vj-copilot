@@ -488,25 +488,10 @@ impl VjApp {
         .to_owned()
     }
 
-    fn show_candidate_controls(&mut self, ui: &mut Ui) {
+    fn show_candidate_controls(&self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             theme::caption(ui, "02 / CLIP CANDIDATES");
             theme::badge(ui, &format!("{} CLIPS", self.library.len()), theme::MUTED);
-            if self.candidates.is_held() {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .button(
-                            RichText::new("オートモードに戻す")
-                                .strong()
-                                .color(theme::ACCENT),
-                        )
-                        .on_hover_text("選択を解除し、候補の自動更新を再開します。")
-                        .clicked()
-                    {
-                        self.resume_auto_mode();
-                    }
-                });
-            }
         });
         ui.label(
             RichText::new(self.analysis_status())
@@ -636,7 +621,7 @@ impl eframe::App for VjApp {
                     self.show_preview_grid(ui);
                     ui.add_space(4.0);
                     ui.label(
-                        RichText::new("1—4  選択     SPACE  オートへ戻る")
+                        RichText::new("1—4  選択     SPACE  選択解除")
                             .monospace()
                             .size(11.0)
                             .color(theme::MUTED),
