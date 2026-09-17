@@ -518,7 +518,6 @@ impl VjApp {
     fn show_preview_grid(&mut self, ui: &mut Ui) {
         let candidate_ids = self.candidates.slots().clone();
         let selected_slot = self.candidates.selected_slot();
-        let is_held = self.candidates.is_held();
         let mut clicked_slot = None;
         let card_width = ((ui.available_width() - 12.0) / 2.0).floor();
 
@@ -533,7 +532,6 @@ impl VjApp {
                         slot_index,
                         clip,
                         selected_slot == Some(slot_index),
-                        is_held,
                         card_width,
                     );
                     if clicked {
@@ -691,13 +689,10 @@ impl PreviewSlot {
         slot_index: usize,
         clip: Option<&MediaClip>,
         selected: bool,
-        held: bool,
         width: f32,
     ) -> bool {
         let stroke = if selected {
             Stroke::new(1.0_f32, theme::ACCENT)
-        } else if held {
-            Stroke::new(1.0_f32, theme::AMBER.gamma_multiply(0.6))
         } else {
             Stroke::new(1.0_f32, theme::BORDER)
         };
