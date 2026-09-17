@@ -5,6 +5,10 @@ edition = "2021"
 license = "MIT"
 description = "LINE input driven video preview MVP"
 
+[features]
+default = []
+asio = ["cpal/asio"]
+
 [dependencies]
 cpal = "0.15"
 eframe = "0.31"

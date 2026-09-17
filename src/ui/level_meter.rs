@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, FontId, Rect, Sense, Stroke, Ui, Vec2};
 
-use crate::domain::valueobject::AnalysisReading;
+use crate::domain::valueobject::AudioLevels;
 
 use super::theme;
 
@@ -28,7 +28,7 @@ impl LevelMeter {
         }
     }
 
-    pub fn update(&mut self, reading: Option<AnalysisReading>, now: Instant) {
+    pub fn update(&mut self, reading: Option<AudioLevels>, now: Instant) {
         let elapsed = now
             .saturating_duration_since(self.last_update)
             .as_secs_f32();
@@ -49,9 +49,9 @@ impl LevelMeter {
         }
     }
 
-    pub fn show(&self, ui: &mut Ui, reading: Option<AnalysisReading>, now: Instant) {
+    pub fn show(&self, ui: &mut Ui, reading: Option<AudioLevels>, now: Instant) {
         ui.horizontal(|ui| {
-            theme::caption(ui, "INPUT LEVEL / MONO");
+            theme::caption(ui, "INPUT LEVEL / 25 ms");
             let text = reading
                 .map(|reading| format!("{:.1} dBFS", reading.rms_dbfs))
                 .unwrap_or_else(|| "-- dBFS".to_owned());
@@ -128,15 +128,11 @@ fn fraction(dbfs: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::valueobject::FeatureVector;
 
-    fn reading(dbfs: f32) -> AnalysisReading {
-        AnalysisReading {
-            features: FeatureVector::new(0.5, 0.5).unwrap(),
+    fn reading(dbfs: f32) -> AudioLevels {
+        AudioLevels {
             rms_dbfs: dbfs,
             peak_dbfs: dbfs,
-            centroid_hz: 400.0,
-            audible: dbfs > FLOOR_DBFS,
         }
     }
 

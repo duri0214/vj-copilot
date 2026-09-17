@@ -11,10 +11,10 @@ use eframe::egui::{
 use crate::{
     domain::{
         service::{rank_clips, AnalysisTick, CandidateRefresh, CandidateState, PREVIEW_SLOT_COUNT},
-        valueobject::{AnalysisReading, ClipId, FeatureVector},
+        valueobject::{AnalysisReading, AudioLevels, ClipId, FeatureVector, TempoReading},
     },
     infra::{
-        analysis_worker::{AnalysisWorker, INPUT_IDLE_TIMEOUT},
+        analysis_worker::{AnalysisUpdate, AnalysisWorker, INPUT_IDLE_TIMEOUT},
         audio_input::{AudioInput, AudioSource, InputStatus},
         media::{
             MediaClip, MediaLibrary, MediaLoadReport, VIDEO_FRAMES_PER_SECOND, VIDEO_HEIGHT,
@@ -24,6 +24,9 @@ use crate::{
 };
 
 use super::{level_meter::LevelMeter, theme};
+
+#[cfg(all(windows, feature = "asio"))]
+use crate::infra::audio_input::AudioBackend;
 
 const THUMBNAIL_SIZE: Vec2 = Vec2::new(112.0, 63.0);
 
@@ -41,8 +44,13 @@ pub struct VjApp {
     demo: bool,
     audio_input: AudioInput,
     analysis_worker: Option<AnalysisWorker>,
-    analysis_ticks: Vec<AnalysisTick>,
+    analysis_ticks: Vec<AnalysisUpdate>,
+    processing_ms: Option<f32>,
+    display_ms: Option<f32>,
     latest_reading: Option<AnalysisReading>,
+    latest_levels: Option<AudioLevels>,
+    tempo: TempoReading,
+    last_beat_at: Option<Instant>,
     last_reading_at: Option<Instant>,
     level_meter: LevelMeter,
     latest_search_features: Option<FeatureVector>,
@@ -67,7 +75,12 @@ impl VjApp {
             audio_input: AudioInput::new(),
             analysis_worker: config.demo.then(AnalysisWorker::start_demo),
             analysis_ticks: Vec::with_capacity(32),
+            processing_ms: None,
+            display_ms: None,
             latest_reading: None,
+            latest_levels: None,
+            tempo: TempoReading::default(),
+            last_beat_at: None,
             last_reading_at: None,
             level_meter: LevelMeter::new(now),
             latest_search_features: None,
@@ -94,9 +107,25 @@ impl VjApp {
             ticks.clear();
         }
         let mut received_search_features = false;
-        for tick in ticks.drain(..) {
-            self.last_reading_at = Some(now);
-            received_search_features |= self.record_analysis_tick(tick);
+        for update in ticks.drain(..) {
+            if now.saturating_duration_since(update.callback_at) >= INPUT_IDLE_TIMEOUT {
+                continue;
+            }
+            self.last_reading_at = Some(update.callback_at);
+            self.processing_ms = Some(
+                update
+                    .analyzed_at
+                    .saturating_duration_since(update.callback_at)
+                    .as_secs_f32()
+                    * 1_000.0,
+            );
+            self.display_ms = Some(
+                now.saturating_duration_since(update.callback_at)
+                    .as_secs_f32()
+                    * 1_000.0,
+            );
+            received_search_features |= self.record_analysis_tick(update.tick, update.callback_at);
+            self.level_meter.update(Some(update.tick.levels), now);
         }
         self.analysis_ticks = ticks;
         if self
@@ -109,10 +138,15 @@ impl VjApp {
         received_search_features
     }
 
-    fn record_analysis_tick(&mut self, tick: AnalysisTick) -> bool {
-        self.latest_reading = Some(tick.reading);
-        if !tick.reading.audible {
-            self.latest_search_features = None;
+    fn record_analysis_tick(&mut self, tick: AnalysisTick, now: Instant) -> bool {
+        self.latest_levels = Some(tick.levels);
+        self.tempo = tick.tempo;
+        if tick.tempo.beat {
+            self.last_beat_at = Some(now);
+        }
+        if let Some(reading) = tick.reading {
+            self.latest_reading = Some(reading);
+            self.latest_search_features = tick.search_features;
         }
         if let Some(features) = tick.search_features {
             self.latest_search_features = Some(features);
@@ -218,19 +252,43 @@ impl VjApp {
             }
         });
         if self.demo {
-            ui.label("デモ音源でプレビューを確認中");
+            ui.label("120 BPM のデモ音源でプレビューを確認中");
             return;
         }
 
         let capturing = self.audio_input.is_capturing();
         ui.add_enabled_ui(!capturing, |ui| {
-            let mut source = self.audio_input.source();
             ui.horizontal(|ui| {
+                #[cfg(all(windows, feature = "asio"))]
+                {
+                    let mut backend = self.audio_input.backend();
+                    ui.selectable_value(&mut backend, AudioBackend::System, "WASAPI");
+                    ui.selectable_value(&mut backend, AudioBackend::Asio, "ASIO");
+                    self.audio_input.select_backend(backend);
+                    ui.separator();
+                }
+                let mut source = self.audio_input.source();
                 #[cfg(windows)]
-                ui.selectable_value(&mut source, AudioSource::SystemPlayback, "PC 再生音");
+                if self.audio_input.supports_loopback() {
+                    ui.selectable_value(&mut source, AudioSource::SystemPlayback, "PC 再生音");
+                }
                 ui.selectable_value(&mut source, AudioSource::LineInput, "LINE / MIC");
+                self.audio_input.select_source(source);
             });
-            self.audio_input.select_source(source);
+            #[cfg(all(windows, feature = "asio"))]
+            if self.audio_input.backend() == AudioBackend::Asio {
+                let mut channel = self.audio_input.first_channel();
+                ui.horizontal(|ui| {
+                    ui.label("入力 ch");
+                    ui.add(egui::DragValue::new(&mut channel).range(1..=128));
+                    ui.label(
+                        RichText::new("隣の ch と mono に合成（最終 ch は単独）")
+                            .size(11.0)
+                            .color(theme::MUTED),
+                    );
+                });
+                self.audio_input.select_first_channel(channel);
+            }
         });
         ui.horizontal(|ui| {
             ui.add_enabled_ui(!capturing, |ui| {
@@ -341,6 +399,78 @@ impl VjApp {
         }
     }
 
+    fn show_tempo(&self, ui: &mut Ui, now: Instant) {
+        ui.horizontal(|ui| {
+            let lit = self.tempo.bpm.is_some()
+                && self.last_beat_at.is_some_and(|at| {
+                    now.saturating_duration_since(at) < Duration::from_millis(100)
+                });
+            let (rect, response) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
+            ui.painter().circle_filled(
+                rect.center(),
+                12.0,
+                theme::ACCENT.gamma_multiply(if lit { 0.25 } else { 0.04 }),
+            );
+            ui.painter().circle_filled(
+                rect.center(),
+                6.0,
+                if lit { theme::ACCENT } else { theme::BORDER },
+            );
+            response.on_hover_text("検出した拍で点灯します。推定中はタイミングが揺れることがあります。");
+            let bpm = self
+                .tempo
+                .bpm
+                .map_or_else(|| "--".to_owned(), |bpm| format!("{bpm:.1}"));
+            ui.label(RichText::new(bpm).monospace().size(30.0).strong());
+            theme::caption(ui, "BPM");
+            let status = if self.latest_levels.is_none() {
+                "入力待ち"
+            } else if self.tempo.stable {
+                "安定"
+            } else {
+                "推定中"
+            };
+            theme::badge(
+                ui,
+                status,
+                if self.tempo.stable { theme::ACCENT } else { theme::AMBER },
+            );
+            ui.label(
+                RichText::new(format!("信頼度 {:.0}%", self.tempo.confidence * 100.0))
+                    .size(11.0)
+                    .color(theme::MUTED),
+            )
+            .on_hover_text("周期性の強さの目安です。BPM が正しい確率ではありません。半分・倍のテンポを拾う場合があります。");
+        });
+    }
+
+    fn show_timing(&self, ui: &mut Ui) {
+        if self.demo {
+            return;
+        }
+        egui::CollapsingHeader::new("入力タイミング / 検証").show(ui, |ui| {
+            if let Some(timing) = self.audio_input.timing() {
+                ui.label(format!(
+                    "コールバック: {} frames / {:.1} ms 分の音声",
+                    timing.frames, timing.buffer_ms,
+                ));
+                ui.label(format!("到着間隔: {:.1} ms", timing.interval_ms));
+            }
+            if let (Some(processing), Some(display)) = (self.processing_ms, self.display_ms) {
+                ui.label(format!(
+                    "受信 → 解析: {processing:.1} ms / 受信 → 描画要求: {display:.1} ms"
+                ));
+            } else {
+                ui.label("入力を開始すると計測します。");
+            }
+            ui.label(
+                RichText::new("直近の値。機器・ドライバーの遅延、画面の表示遅延は含みません。音量の集計窓は 25 ms です。")
+                    .size(11.0)
+                    .color(theme::MUTED),
+            );
+        });
+    }
+
     fn analysis_status(&self) -> &'static str {
         if !self.demo && !self.audio_input.is_capturing() {
             return "入力を開始すると候補を提案します";
@@ -435,6 +565,11 @@ impl VjApp {
 
     fn clear_analysis(&mut self) {
         self.latest_reading = None;
+        self.latest_levels = None;
+        self.tempo = TempoReading::default();
+        self.last_beat_at = None;
+        self.processing_ms = None;
+        self.display_ms = None;
         self.last_reading_at = None;
         self.latest_search_features = None;
     }
@@ -460,7 +595,7 @@ impl eframe::App for VjApp {
         self.handle_shortcuts(context);
         let received_search_features = self.collect_analysis_ticks(now);
         self.update_candidates(now, received_search_features);
-        self.level_meter.update(self.latest_reading, now);
+        self.level_meter.update(self.latest_levels, now);
 
         egui::CentralPanel::default()
             .frame(Frame::new().fill(theme::BACKGROUND).inner_margin(20))
@@ -483,8 +618,10 @@ impl eframe::App for VjApp {
                         ui.set_width(ui.available_width());
                         self.show_input_controls(ui);
                         ui.add_space(6.0);
-                        self.level_meter.show(ui, self.latest_reading, now);
+                        self.level_meter.show(ui, self.latest_levels, now);
+                        self.show_tempo(ui, now);
                         self.show_analysis(ui);
+                        self.show_timing(ui);
                     });
                     ui.add_space(8.0);
                     self.show_candidate_controls(ui);

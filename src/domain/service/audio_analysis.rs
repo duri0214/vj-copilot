@@ -2,16 +2,23 @@ use std::{collections::VecDeque, sync::Arc};
 
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
 
-use crate::domain::valueobject::{AnalysisReading, FeatureVector, SILENCE_DBFS};
+use crate::domain::valueobject::{
+    AnalysisReading, AudioLevels, FeatureVector, TempoReading, SILENCE_DBFS,
+};
+
+use super::tempo::TempoTracker;
 
 pub const ANALYSIS_INTERVAL_MS: u32 = 200;
+pub const METER_INTERVAL_MS: u32 = 25;
 pub const FFT_SIZE: usize = 2048;
 const SEARCH_WINDOW_SEGMENTS: usize = 5;
 const BRIGHTNESS_REFERENCE_HZ: f32 = 8_000.0;
 
 #[derive(Clone, Copy, Debug)]
 pub struct AnalysisTick {
-    pub reading: AnalysisReading,
+    pub levels: AudioLevels,
+    pub tempo: TempoReading,
+    pub reading: Option<AnalysisReading>,
     pub search_features: Option<FeatureVector>,
 }
 
@@ -23,6 +30,10 @@ pub struct AudioFeatureTracker {
     recent_readings: VecDeque<AnalysisReading>,
     fft: Arc<dyn Fft<f32>>,
     fft_buffer: Vec<Complex<f32>>,
+    meter_interval_samples: usize,
+    meter_interval: Vec<f32>,
+    pending_reading: Option<AnalysisReading>,
+    tempo: TempoTracker,
 }
 
 impl AudioFeatureTracker {
@@ -32,6 +43,8 @@ impl AudioFeatureTracker {
             ((f64::from(sample_rate) * f64::from(ANALYSIS_INTERVAL_MS) / 1_000.0).round() as usize)
                 .max(1);
         let mut planner = FftPlanner::<f32>::new();
+        let meter_interval_samples =
+            ((sample_rate as f64 * METER_INTERVAL_MS as f64 / 1_000.0).round() as usize).max(1);
 
         Self {
             sample_rate,
@@ -41,32 +54,47 @@ impl AudioFeatureTracker {
             recent_readings: VecDeque::with_capacity(SEARCH_WINDOW_SEGMENTS),
             fft: planner.plan_fft_forward(FFT_SIZE),
             fft_buffer: vec![Complex::new(0.0, 0.0); FFT_SIZE],
+            meter_interval_samples,
+            meter_interval: Vec::with_capacity(meter_interval_samples),
+            pending_reading: None,
+            tempo: TempoTracker::new(sample_rate),
         }
     }
 
     pub fn push_sample(&mut self, sample: f32) -> Option<AnalysisTick> {
         let sample = sanitize_sample(sample);
         self.interval.push(sample);
+        self.meter_interval.push(sample);
+        self.tempo.push_sample(sample);
 
         if self.spectral_history.len() == FFT_SIZE {
             let _ = self.spectral_history.pop_front();
         }
         self.spectral_history.push_back(sample);
 
-        if self.interval.len() < self.interval_samples {
+        if self.interval.len() >= self.interval_samples {
+            let reading = self.measure_interval();
+            self.interval.clear();
+            if self.recent_readings.len() == SEARCH_WINDOW_SEGMENTS {
+                let _ = self.recent_readings.pop_front();
+            }
+            self.recent_readings.push_back(reading);
+            self.pending_reading = Some(reading);
+        }
+
+        if self.meter_interval.len() < self.meter_interval_samples {
             return None;
         }
-
-        let reading = self.measure_interval();
-        self.interval.clear();
-
-        if self.recent_readings.len() == SEARCH_WINDOW_SEGMENTS {
-            let _ = self.recent_readings.pop_front();
-        }
-        self.recent_readings.push_back(reading);
-
-        let search_features = self.one_second_features();
+        let levels = AudioLevels {
+            rms_dbfs: rms_dbfs(&self.meter_interval),
+            peak_dbfs: peak_dbfs(&self.meter_interval),
+        };
+        self.meter_interval.clear();
+        let reading = self.pending_reading.take();
+        let search_features = reading.and_then(|_| self.one_second_features());
         Some(AnalysisTick {
+            levels,
+            tempo: self.tempo.take_reading(),
             reading,
             search_features,
         })
@@ -82,8 +110,6 @@ impl AudioFeatureTracker {
 
         AnalysisReading {
             features,
-            rms_dbfs,
-            peak_dbfs: peak_dbfs(&self.interval),
             centroid_hz,
             audible: rms_dbfs > SILENCE_DBFS,
         }
@@ -237,6 +263,7 @@ mod tests {
         let energy = tick
             .expect("one analysis interval should complete")
             .reading
+            .expect("feature interval")
             .features
             .energy();
         assert!((energy - 0.8997).abs() < 0.01);
@@ -247,12 +274,12 @@ mod tests {
         let mut tracker = AudioFeatureTracker::new(1_000);
         tracker.push_sample(-1.0);
         let mut tick = None;
-        for _ in 1..200 {
+        for _ in 1..25 {
             tick = tracker.push_sample(0.0);
         }
-        let reading = tick.expect("one analysis interval").reading;
+        let reading = tick.expect("one meter interval").levels;
         assert!(reading.peak_dbfs.abs() < 0.001);
-        assert!(reading.rms_dbfs < -20.0);
+        assert!(reading.rms_dbfs < -10.0);
     }
 
     #[test]
@@ -262,7 +289,7 @@ mod tests {
         for _ in 0..200 {
             tick = tracker.push_sample(0.0);
         }
-        let reading = tick.expect("one analysis interval").reading;
+        let reading = tick.expect("one meter interval").levels;
         assert!(reading.rms_dbfs.is_finite() && reading.rms_dbfs < -60.0);
         assert!(reading.peak_dbfs.is_finite() && reading.peak_dbfs < -60.0);
     }
@@ -291,7 +318,7 @@ mod tests {
         }
 
         let tick = last_tick.expect("five analysis intervals should complete");
-        assert!(!tick.reading.audible);
+        assert!(!tick.reading.unwrap().audible);
         assert!(tick.search_features.is_none());
     }
 
@@ -307,7 +334,30 @@ mod tests {
         }
 
         let tick = last_tick.expect("five analysis intervals should complete");
-        assert!(tick.reading.audible);
+        assert!(tick.reading.unwrap().audible);
         assert!(tick.search_features.is_some());
+    }
+
+    #[test]
+    fn meter_updates_every_25ms_without_shortening_the_search_window() {
+        for rate in [44_100, 48_000] {
+            let mut tracker = AudioFeatureTracker::new(rate);
+            let mut previous = 0;
+            let mut updates = 0;
+            let mut readings = 0;
+            for index in 1..=rate {
+                if let Some(tick) = tracker.push_sample(0.25) {
+                    let milliseconds = (index - previous) as f32 / rate as f32 * 1_000.0;
+                    assert!((24.9..25.1).contains(&milliseconds));
+                    assert!((tick.levels.rms_dbfs + 12.0412).abs() < 0.01);
+                    assert!(tick.search_features.is_none() || index >= rate);
+                    readings += usize::from(tick.reading.is_some());
+                    previous = index;
+                    updates += 1;
+                }
+            }
+            assert!((39..=40).contains(&updates));
+            assert!((4..=5).contains(&readings));
+        }
     }
 }
