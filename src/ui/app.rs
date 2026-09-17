@@ -339,22 +339,12 @@ impl VjApp {
                 }
             }
         });
-        match self.audio_input.source() {
-            #[cfg(windows)]
-            AudioSource::SystemPlayback => {
-                ui.label(
-                    RichText::new("iTunes と同じ出力先を選択 → 開始。PC の再生音を取り込みます。")
-                        .size(11.0)
-                        .color(theme::MUTED),
-                );
-            }
-            AudioSource::LineInput => {
-                ui.label(
-                    RichText::new("ミキサーの LINE 出力、またはマイクを取り込みます。")
-                        .size(11.0)
-                        .color(theme::MUTED),
-                );
-            }
+        if self.audio_input.source() == AudioSource::LineInput {
+            ui.label(
+                RichText::new("ミキサーの LINE 出力、またはマイクを取り込みます。")
+                    .size(11.0)
+                    .color(theme::MUTED),
+            );
         }
         let status_color = match self.audio_input.status() {
             InputStatus::Error(_) | InputStatus::Unsupported(_) | InputStatus::NoDevice => {
@@ -454,16 +444,25 @@ impl VjApp {
         }
         egui::CollapsingHeader::new("入力タイミング / 検証").show(ui, |ui| {
             if let Some(timing) = self.audio_input.timing() {
-                ui.label(format!(
-                    "コールバック: {} frames / {:.1} ms 分の音声",
-                    timing.frames, timing.buffer_ms,
-                ));
-                ui.label(format!("到着間隔: {:.1} ms", timing.interval_ms));
+                ui.label(
+                    RichText::new(format!(
+                        "コールバック: {:>8} frames / {:>8.1} ms 分の音声",
+                        timing.frames, timing.buffer_ms,
+                    ))
+                    .monospace(),
+                );
+                ui.label(
+                    RichText::new(format!("到着間隔: {:>8.1} ms", timing.interval_ms))
+                        .monospace(),
+                );
             }
             if let (Some(processing), Some(display)) = (self.processing_ms, self.display_ms) {
-                ui.label(format!(
-                    "受信 → 解析: {processing:.1} ms / 受信 → 描画要求: {display:.1} ms"
-                ));
+                ui.label(
+                    RichText::new(format!(
+                        "受信 → 解析: {processing:>8.1} ms / 受信 → 描画要求: {display:>8.1} ms"
+                    ))
+                    .monospace(),
+                );
             } else {
                 ui.label("入力を開始すると計測します。");
             }
