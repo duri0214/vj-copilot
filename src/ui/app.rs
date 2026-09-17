@@ -607,7 +607,8 @@ impl eframe::App for VjApp {
         egui::CentralPanel::default()
             .frame(Frame::new().fill(theme::BACKGROUND).inner_margin(20))
             .show(context, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
+                let scroll_area = egui::ScrollArea::vertical().auto_shrink([false, true]);
+                scroll_area.show(ui, |ui| {
                     ui.set_width((ui.available_width() - SCROLL_CONTENT_RIGHT_MARGIN).max(0.0));
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("VJ").size(25.0).strong().color(theme::ACCENT));
