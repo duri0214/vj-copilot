@@ -189,8 +189,8 @@ impl VjApp {
         if context.wants_keyboard_input() {
             return;
         }
-        if context.input(|input| input.key_pressed(Key::Space)) {
-            self.toggle_hold();
+        if self.candidates.is_held() && context.input(|input| input.key_pressed(Key::Space)) {
+            self.resume_auto_mode();
         }
 
         let selected_slot = context.input(|input| {
@@ -209,14 +209,10 @@ impl VjApp {
         }
     }
 
-    fn toggle_hold(&mut self) {
-        let was_held = self.candidates.is_held();
-        self.candidates.toggle_hold();
-
-        if was_held {
-            self.candidate_refresh.reset();
-            self.needs_candidate_refresh = true;
-        }
+    fn resume_auto_mode(&mut self) {
+        self.candidates.release();
+        self.candidate_refresh.reset();
+        self.needs_candidate_refresh = true;
     }
 
     fn advance_animation(&mut self, now: Instant) {
@@ -475,46 +471,42 @@ impl VjApp {
         });
     }
 
-    fn analysis_status(&self) -> &'static str {
+    fn analysis_status(&self) -> String {
+        if let Some(slot) = self.candidates.selected_slot() {
+            return format!("候補 {} を選択中", slot + 1);
+        }
         if !self.demo && !self.audio_input.is_capturing() {
-            return "入力を開始すると候補を提案します";
+            return "入力を開始すると候補を提案します".to_owned();
         }
 
         match self.latest_reading {
             None => "音声待機中 — 音源の再生とデバイスを確認してください",
             Some(reading) if !reading.audible => "無音を検出: 候補を保持中",
             Some(_) if self.latest_search_features.is_none() => "有音入力を 1 秒分待機中",
-            Some(_) if self.candidates.is_held() => "候補を固定中",
             Some(_) => "候補を自動更新中",
         }
+        .to_owned()
     }
 
     fn show_candidate_controls(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             theme::caption(ui, "02 / CLIP CANDIDATES");
             theme::badge(ui, &format!("{} CLIPS", self.library.len()), theme::MUTED);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let (button_text, tooltip) = if self.candidates.is_held() {
-                    (
-                        "自動更新を再開",
-                        "候補の固定を解除して、自動更新を再開します。選択表示も解除します。",
-                    )
-                } else {
-                    ("候補を固定", "現在の候補を固定し、自動更新を停止します。")
-                };
-                let color = if self.candidates.is_held() {
-                    theme::AMBER
-                } else {
-                    theme::ACCENT
-                };
-                if ui
-                    .button(RichText::new(button_text).strong().color(color))
-                    .on_hover_text(tooltip)
-                    .clicked()
-                {
-                    self.toggle_hold();
-                }
-            });
+            if self.candidates.is_held() {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .button(
+                            RichText::new("オートモードに戻す")
+                                .strong()
+                                .color(theme::ACCENT),
+                        )
+                        .on_hover_text("選択を解除し、候補の自動更新を再開します。")
+                        .clicked()
+                    {
+                        self.resume_auto_mode();
+                    }
+                });
+            }
         });
         ui.label(
             RichText::new(self.analysis_status())
@@ -646,7 +638,7 @@ impl eframe::App for VjApp {
                     self.show_preview_grid(ui);
                     ui.add_space(4.0);
                     ui.label(
-                        RichText::new("1—4  選択     SPACE  候補固定 / 再開")
+                        RichText::new("1—4  選択     SPACE  オートへ戻る")
                             .monospace()
                             .size(11.0)
                             .color(theme::MUTED),
