@@ -29,6 +29,7 @@ use super::{level_meter::LevelMeter, theme};
 use crate::infra::audio_input::AudioBackend;
 
 const THUMBNAIL_SIZE: Vec2 = Vec2::new(112.0, 63.0);
+const SCROLL_CONTENT_RIGHT_MARGIN: f32 = 20.0;
 
 pub struct AppConfig {
     pub media_dir: Option<PathBuf>,
@@ -604,6 +605,7 @@ impl eframe::App for VjApp {
             .frame(Frame::new().fill(theme::BACKGROUND).inner_margin(20))
             .show(context, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.set_width((ui.available_width() - SCROLL_CONTENT_RIGHT_MARGIN).max(0.0));
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("VJ").size(25.0).strong().color(theme::ACCENT));
                         ui.label(RichText::new("COPILOT").size(25.0).strong());
