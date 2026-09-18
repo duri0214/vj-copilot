@@ -8,6 +8,9 @@ use super::theme;
 
 const FLOOR_DBFS: f32 = -60.0;
 const PEAK_HOLD: Duration = Duration::from_secs(1);
+const METER_GREEN: Color32 = Color32::from_rgb(98, 224, 47);
+const METER_AMBER: Color32 = Color32::from_rgb(255, 184, 32);
+const METER_RED: Color32 = Color32::from_rgb(255, 59, 48);
 
 pub struct LevelMeter {
     rms_dbfs: f32,
@@ -63,7 +66,7 @@ impl LevelMeter {
                 .clip_at
                 .is_some_and(|at| now.saturating_duration_since(at) < PEAK_HOLD)
             {
-                theme::badge(ui, "CLIP", theme::RED);
+                theme::badge(ui, "CLIP", METER_RED);
             }
         });
         let (rect, response) =
@@ -77,11 +80,11 @@ impl LevelMeter {
         for index in 0..SEGMENTS {
             let threshold = FLOOR_DBFS + (index + 1) as f32 / SEGMENTS as f32 * -FLOOR_DBFS;
             let color = if threshold > -3.0 {
-                theme::RED
+                METER_RED
             } else if threshold > -12.0 {
-                theme::AMBER
+                METER_AMBER
             } else {
-                theme::ACCENT
+                METER_GREEN
             };
             let segment = Rect::from_min_size(
                 rect.min + Vec2::new(index as f32 * segment_width, 0.0),
