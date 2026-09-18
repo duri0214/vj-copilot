@@ -81,6 +81,8 @@ FFT の正のスペクトル変化（log spectral flux）から立ち上がり�
 
 通常ビルドは WASAPI を使い、ASIO SDK や LLVM は不要です。ASIO 対応機器のメーカー製ドライバーを用意した場合に、`asio` feature を追加できます。[CPAL 0.15.3 の ASIO 手順](https://github.com/RustAudio/cpal/tree/v0.15.3#asio-on-windows)に従い、Visual Studio C++ Build Tools と `libclang.dll` を準備します。
 
+`--features asio` はビルド時に必須です。feature を付けない `cargo run --release -- --media-dir .\demo-media` は WASAPI 版として起動するため、画面に ASIO ボタンは表示されません。ASIO を使う場合は、次のように `--features asio` を付けて起動してください。`LIBCLANG_PATH` と `CPAL_ASIO_DIR` は、インストール先または手動配置した SDK の場所に合わせて変更します。
+
 ```powershell
 # LLVM をこの場所にインストールした場合。実際の libclang.dll のフォルダを指定します。
 $env:LIBCLANG_PATH = 'C:\Program Files\LLVM\bin'
