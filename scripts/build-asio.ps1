@@ -75,8 +75,8 @@ try {
     Write-Host "ASIO feature を有効にして release build を開始します..." -ForegroundColor Cyan
     & $cargo.Source --config $cargoConfigPath build --release --features asio
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "ASIOビルドに失敗しました。Visual Studio C++ Build Tools と配置したSDK/LLVMを確認してください。"
         Write-Host "ASIOを使わずWASAPI版を起動する場合: cargo run --release -- --media-dir .\demo-media" -ForegroundColor Cyan
+        Write-Error "ASIOビルドに失敗しました。Visual Studio C++ Build Tools と配置したSDK/LLVMを確認してください。"
         exit $LASTEXITCODE
     }
 }
