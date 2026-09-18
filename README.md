@@ -105,6 +105,21 @@ ASIO SDKは[Steinbergの配布元](https://www.steinberg.net/asiosdk)から取�
 
 出力先は `target\release\vj-copilot.exe` です。このEXEにはWASAPIとASIOの両方が含まれます。実行時に必要なのは対応機器のメーカー製ASIOドライバーだけで、SDK・LLVM・`libclang.dll`は不要です。ASIOを選び、ドライバーと入力chの先頭番号を指定して「開始」を押してください。指定chと次のchを平均し、最終chを指定した場合はmonoとして取得します。範囲外のchはエラーを表示します。PC再生音のループバックはWASAPI側で選択します。
 
+コマンドの使い分けは次のとおりです。
+
+```powershell
+# WASAPI版をビルドして起動する（ASIO資材は不要）
+cargo run --release -- --media-dir .\demo-media
+
+# ASIO対応版をビルドする（プロジェクト直下で実行）
+.\scripts\build-asio.ps1
+
+# 上のスクリプトで作成したEXEを直接起動する
+.\target\release\vj-copilot.exe --media-dir .\demo-media
+```
+
+ASIO用資材が不足してスクリプトがエラーになった場合は、ASIO対応版は作成されません。WASAPI版を使う場合は、上の `cargo run --release -- --media-dir .\demo-media` を実行してください。
+
 ASIOドライバーがない場合は「入力デバイスが見つかりません」と表示されます。WASAPIへ戻すと通常の入力を利用できます。バッファサイズ・サンプルレートはドライバーの既定値を使うため、変更する場合は入力を停止し、機器の設定パネルで変更してから再開します。
 
 ### 遅延の検証

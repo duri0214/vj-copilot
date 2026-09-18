@@ -41,6 +41,7 @@ if ($missingFiles.Count -gt 0) {
     Write-Host "配置方法は README.md の『ASIO 入力を追加したビルド』を確認してください。" -ForegroundColor Yellow
     Write-Host "ASIO SDK は common と host を含む展開済みSDKのルートを tools\asio-sdk に置きます。"
     Write-Host "LLVM は bin\libclang.dll を tools\llvm\bin に置きます。"
+    Write-Host "ASIOを使わずWASAPI版を起動する場合: cargo run --release -- --media-dir .\demo-media" -ForegroundColor Cyan
     exit 1
 }
 
@@ -75,6 +76,7 @@ try {
     & $cargo.Source --config $cargoConfigPath build --release --features asio
     if ($LASTEXITCODE -ne 0) {
         Write-Error "ASIOビルドに失敗しました。Visual Studio C++ Build Tools と配置したSDK/LLVMを確認してください。"
+        Write-Host "ASIOを使わずWASAPI版を起動する場合: cargo run --release -- --media-dir .\demo-media" -ForegroundColor Cyan
         exit $LASTEXITCODE
     }
 }
