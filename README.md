@@ -81,21 +81,31 @@ FFT の正のスペクトル変化（log spectral flux）から立ち上がり�
 
 通常ビルドは WASAPI を使い、ASIO SDK や LLVM は不要です。ASIO 対応機器のメーカー製ドライバーを用意した場合に、`asio` feature を追加できます。[CPAL 0.15.3 の ASIO 手順](https://github.com/RustAudio/cpal/tree/v0.15.3#asio-on-windows)に従い、Visual Studio C++ Build Tools と `libclang.dll` を準備します。
 
-`--features asio` はビルド時に必須です。feature を付けない `cargo run --release -- --media-dir .\demo-media` は WASAPI 版として起動するため、画面に ASIO ボタンは表示されません。ASIO を使う場合は、次のように `--features asio` を付けて起動してください。`LIBCLANG_PATH` と `CPAL_ASIO_DIR` は、インストール先または手動配置した SDK の場所に合わせて変更します。
+`--features asio` はビルド時に必須です。feature を付けない `cargo run --release -- --media-dir .\demo-media` は WASAPI 版として起動するため、画面に ASIO ボタンは表示されません。
 
-```powershell
-# LLVM をこの場所にインストールした場合。実際の libclang.dll のフォルダを指定します。
-$env:LIBCLANG_PATH = 'C:\Program Files\LLVM\bin'
-# SDK を手動配置する場合のみ、common / host を含むフォルダを指定します。
-# $env:CPAL_ASIO_DIR = 'C:\SDKs\asiosdk'
-cargo run --release --features asio -- --media-dir .\demo-media
+プロジェクト内に次のビルド資材を配置します。`tools\` 以下は `.gitignore` 対象で、SDKやLLVMのバイナリをGitへコミットしません。
+
+```text
+tools\
+├─ asio-sdk\             # 展開済みASIO SDKのルート（common\ と host\ を含む）
+└─ llvm\
+   └─ bin\
+      └─ libclang.dll
 ```
 
-exe だけを作る場合は `cargo build --release --features asio` を実行します。出力先は通常版と同じ `target\release\vj-copilot.exe` です。ASIO と WASAPI の両方を使う場合は ASIO 有効版を起動してください。SDK と LLVM はビルド時に必要で、実行時には対応機器の ASIO ドライバーを使います。
+ASIO SDKは[Steinbergの配布元](https://www.steinberg.net/asiosdk)から取得し、`common` と `host` が直下に見えるフォルダ全体を `tools\asio-sdk` に置きます。LLVMは `bin\libclang.dll` を `tools\llvm\bin` に置きます。Visual Studio C++ Build Toolsも必要です。
 
-`CPAL_ASIO_DIR` が未指定なら依存の `asio-sys` が初回ビルド時に [Steinberg ASIO SDK](https://www.steinberg.net/asiosdk) を取得します。アプリに **WASAPI / ASIO** の切替が現れます。ASIO を選び、ドライバーと入力 ch の先頭番号を指定して「開始」を押してください。指定 ch と次の ch を平均し、最終 ch を指定した場合は mono として取得します。範囲外の ch はエラーを表示します。PC 再生音のループバックは WASAPI 側で選択します。
+配置後は、プロジェクト直下で次のスクリプトを実行します。スクリプトが必要なファイルを確認し、足りない場合は配置先を示して終了します。PowerShellで環境変数を設定する必要はありません。
 
-ドライバーがない場合は「入力デバイスが見つかりません」と表示し、WASAPI へ戻せます。バッファサイズ・サンプルレートはドライバーの既定値を使うため、変更する場合は入力を停止し、機器の設定パネルで変更してから再開します。
+```powershell
+.\scripts\build-asio.ps1
+```
+
+このスクリプトは CPAL がビルド時に必要とするパスを一時的な Cargo 設定へ渡し、ビルド後に設定ファイルを削除します。利用者が `CPAL_ASIO_DIR` や `LIBCLANG_PATH` を環境変数へ設定したり、設定を残したりする必要はありません。
+
+出力先は `target\release\vj-copilot.exe` です。このEXEにはWASAPIとASIOの両方が含まれます。実行時に必要なのは対応機器のメーカー製ASIOドライバーだけで、SDK・LLVM・`libclang.dll`は不要です。ASIOを選び、ドライバーと入力chの先頭番号を指定して「開始」を押してください。指定chと次のchを平均し、最終chを指定した場合はmonoとして取得します。範囲外のchはエラーを表示します。PC再生音のループバックはWASAPI側で選択します。
+
+ASIOドライバーがない場合は「入力デバイスが見つかりません」と表示されます。WASAPIへ戻すと通常の入力を利用できます。バッファサイズ・サンプルレートはドライバーの既定値を使うため、変更する場合は入力を停止し、機器の設定パネルで変更してから再開します。
 
 ### 遅延の検証
 
@@ -145,6 +155,7 @@ USB マイクでも PCM・音量・BPM の動作は確認できます。ただ�
 cargo fmt --all -- --check
 cargo test --all-targets
 # ASIO のビルド環境を準備した場合
+.\scripts\build-asio.ps1
 cargo test --all-targets --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 ```
