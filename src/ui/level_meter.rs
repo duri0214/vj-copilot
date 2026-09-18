@@ -2,12 +2,15 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, FontId, Rect, Sense, Stroke, Ui, Vec2};
 
-use crate::domain::valueobject::AnalysisReading;
+use crate::domain::valueobject::AudioLevels;
 
 use super::theme;
 
 const FLOOR_DBFS: f32 = -60.0;
 const PEAK_HOLD: Duration = Duration::from_secs(1);
+const METER_GREEN: Color32 = Color32::from_rgb(98, 224, 47);
+const METER_AMBER: Color32 = Color32::from_rgb(255, 184, 32);
+const METER_RED: Color32 = Color32::from_rgb(255, 59, 48);
 
 pub struct LevelMeter {
     rms_dbfs: f32,
@@ -28,7 +31,7 @@ impl LevelMeter {
         }
     }
 
-    pub fn update(&mut self, reading: Option<AnalysisReading>, now: Instant) {
+    pub fn update(&mut self, reading: Option<AudioLevels>, now: Instant) {
         let elapsed = now
             .saturating_duration_since(self.last_update)
             .as_secs_f32();
@@ -49,18 +52,21 @@ impl LevelMeter {
         }
     }
 
-    pub fn show(&self, ui: &mut Ui, reading: Option<AnalysisReading>, now: Instant) {
+    pub fn show(&self, ui: &mut Ui, reading: Option<AudioLevels>, now: Instant) {
         ui.horizontal(|ui| {
-            theme::caption(ui, "INPUT LEVEL / MONO");
+            theme::caption(ui, "INPUT LEVEL / 25 ms");
             let text = reading
                 .map(|reading| format!("{:.1} dBFS", reading.rms_dbfs))
                 .unwrap_or_else(|| "-- dBFS".to_owned());
-            ui.monospace(text);
+            ui.add_sized(
+                Vec2::new(96.0, 18.0),
+                egui::Label::new(egui::RichText::new(text).monospace()).halign(egui::Align::RIGHT),
+            );
             if self
                 .clip_at
                 .is_some_and(|at| now.saturating_duration_since(at) < PEAK_HOLD)
             {
-                theme::badge(ui, "CLIP", theme::RED);
+                theme::badge(ui, "CLIP", METER_RED);
             }
         });
         let (rect, response) =
@@ -74,11 +80,11 @@ impl LevelMeter {
         for index in 0..SEGMENTS {
             let threshold = FLOOR_DBFS + (index + 1) as f32 / SEGMENTS as f32 * -FLOOR_DBFS;
             let color = if threshold > -3.0 {
-                theme::RED
+                METER_RED
             } else if threshold > -12.0 {
-                theme::AMBER
+                METER_AMBER
             } else {
-                theme::ACCENT
+                METER_GREEN
             };
             let segment = Rect::from_min_size(
                 rect.min + Vec2::new(index as f32 * segment_width, 0.0),
@@ -128,15 +134,11 @@ fn fraction(dbfs: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::valueobject::FeatureVector;
 
-    fn reading(dbfs: f32) -> AnalysisReading {
-        AnalysisReading {
-            features: FeatureVector::new(0.5, 0.5).unwrap(),
+    fn reading(dbfs: f32) -> AudioLevels {
+        AudioLevels {
             rms_dbfs: dbfs,
             peak_dbfs: dbfs,
-            centroid_hz: 400.0,
-            audible: dbfs > FLOOR_DBFS,
         }
     }
 

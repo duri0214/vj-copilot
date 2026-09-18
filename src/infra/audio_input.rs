@@ -6,13 +6,44 @@ use std::{
         mpsc::{sync_channel, Receiver, SyncSender},
         Arc, Mutex,
     },
+    time::Instant,
 };
 
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     Device, SampleFormat, SizedSample, Stream, StreamConfig,
 };
-const MAX_BUFFERED_SECONDS: usize = 2;
+const MAX_BUFFERED_MILLISECONDS: usize = 250;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AudioBackend {
+    #[default]
+    System,
+    #[cfg(all(windows, feature = "asio"))]
+    Asio,
+}
+
+impl AudioBackend {
+    fn is_asio(self) -> bool {
+        match self {
+            Self::System => false,
+            #[cfg(all(windows, feature = "asio"))]
+            Self::Asio => true,
+        }
+    }
+}
+
+#[derive(Default)]
+struct CaptureTimingState {
+    frames: AtomicUsize,
+    interval_us: AtomicUsize,
+}
+
+pub struct CaptureTiming {
+    pub frames: usize,
+    pub buffer_ms: f32,
+    pub interval_ms: f32,
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AudioSource {
@@ -107,6 +138,8 @@ impl Error for AudioInputError {}
 
 pub struct AudioInput {
     host: cpal::Host,
+    backend: AudioBackend,
+    first_channel: usize,
     source: AudioSource,
     device_names: Vec<String>,
     selected_device: Option<String>,
@@ -114,17 +147,33 @@ pub struct AudioInput {
     status: InputStatus,
     stream_errors: Arc<Mutex<Option<String>>>,
     dropped_samples: Arc<AtomicUsize>,
+    timing: Arc<CaptureTimingState>,
 }
 
 pub struct CapturedSamples {
     pub sample_rate: u32,
-    pub(crate) samples: Receiver<f32>,
+    pub(crate) samples: Receiver<CapturedSample>,
+}
+
+pub(crate) struct CapturedSample {
+    pub value: f32,
+    pub callback_at: Instant,
+    pub sequence: u64,
+}
+
+struct CaptureSink {
+    sender: SyncSender<CapturedSample>,
+    dropped: Arc<AtomicUsize>,
+    errors: Arc<Mutex<Option<String>>>,
+    timing: Arc<CaptureTimingState>,
 }
 
 impl AudioInput {
     pub fn new() -> Self {
         let mut input = Self {
             host: cpal::default_host(),
+            backend: AudioBackend::default(),
+            first_channel: 0,
             source: AudioSource::default(),
             device_names: Vec::new(),
             selected_device: None,
@@ -132,6 +181,7 @@ impl AudioInput {
             status: InputStatus::Stopped,
             stream_errors: Arc::new(Mutex::new(None)),
             dropped_samples: Arc::new(AtomicUsize::new(0)),
+            timing: Arc::new(CaptureTimingState::default()),
         };
         input.refresh_devices();
         input
@@ -145,7 +195,71 @@ impl AudioInput {
         self.source
     }
 
+    pub fn supports_loopback(&self) -> bool {
+        !self.backend.is_asio()
+    }
+
+    #[cfg(all(windows, feature = "asio"))]
+    pub fn backend(&self) -> AudioBackend {
+        self.backend
+    }
+
+    #[cfg(all(windows, feature = "asio"))]
+    pub fn select_backend(&mut self, backend: AudioBackend) {
+        if self.backend == backend {
+            return;
+        }
+        self.stop();
+        let host = match backend {
+            AudioBackend::System => Ok(cpal::default_host()),
+            AudioBackend::Asio => cpal::host_from_id(cpal::HostId::Asio),
+        };
+        match host {
+            Ok(host) => {
+                self.host = host;
+                self.backend = backend;
+                self.source = if backend.is_asio() {
+                    AudioSource::LineInput
+                } else {
+                    AudioSource::default()
+                };
+                self.selected_device = None;
+                self.first_channel = 0;
+                self.refresh_devices();
+            }
+            Err(error) => {
+                self.status = InputStatus::Error(format!("ASIO を初期化できません: {error}"))
+            }
+        }
+    }
+
+    #[cfg(all(windows, feature = "asio"))]
+    pub fn first_channel(&self) -> usize {
+        self.first_channel + 1
+    }
+
+    #[cfg(all(windows, feature = "asio"))]
+    pub fn select_first_channel(&mut self, channel: usize) {
+        self.first_channel = channel.saturating_sub(1);
+    }
+
+    pub fn timing(&self) -> Option<CaptureTiming> {
+        let InputStatus::Capturing { sample_rate, .. } = self.status else {
+            return None;
+        };
+        let frames = self.timing.frames.load(Ordering::Relaxed);
+        (frames > 0).then(|| CaptureTiming {
+            frames,
+            buffer_ms: frames as f32 / sample_rate as f32 * 1_000.0,
+            interval_ms: self.timing.interval_us.load(Ordering::Relaxed) as f32 / 1_000.0,
+        })
+    }
+
     pub fn select_source(&mut self, source: AudioSource) {
+        #[cfg(windows)]
+        if source == AudioSource::SystemPlayback && !self.supports_loopback() {
+            return;
+        }
         if self.source != source {
             self.stop();
             self.source = source;
@@ -262,58 +376,66 @@ impl AudioInput {
         let config: StreamConfig = supported_config.config();
         let channels = usize::from(config.channels);
 
-        if !(1..=2).contains(&channels) {
+        if channels == 0 || (!self.backend.is_asio() && channels > 2) {
             return Err(AudioInputError::UnsupportedInput(format!(
                 "{channels} チャンネル入力は未対応です。mono または stereo を選んでください"
             )));
         }
 
+        if self.first_channel >= channels {
+            return Err(AudioInputError::UnsupportedInput(format!(
+                "入力 ch {} は範囲外です。この機器の入力は {channels} ch です。",
+                self.first_channel + 1
+            )));
+        }
+
         if !matches!(
             sample_format,
-            SampleFormat::F32 | SampleFormat::I16 | SampleFormat::U16
+            SampleFormat::F32
+                | SampleFormat::F64
+                | SampleFormat::I16
+                | SampleFormat::U16
+                | SampleFormat::I32
         ) {
             return Err(AudioInputError::UnsupportedInput(format!(
-                "{sample_format:?} PCM は未対応です。f32、i16、u16 の入力を選んでください"
+                "{sample_format:?} PCM は未対応です。f32、f64、i16、i32、u16 の入力を選んでください"
             )));
         }
 
         let capacity = (config.sample_rate.0 as usize)
-            .saturating_mul(MAX_BUFFERED_SECONDS)
-            .clamp(1_024, 192_000);
+            .saturating_mul(MAX_BUFFERED_MILLISECONDS)
+            .saturating_div(1_000)
+            .clamp(1_024, 48_000);
         let (sender, receiver) = sync_channel(capacity);
         self.dropped_samples.store(0, Ordering::Relaxed);
+        self.timing.frames.store(0, Ordering::Relaxed);
+        self.timing.interval_us.store(0, Ordering::Relaxed);
         if let Ok(mut errors) = self.stream_errors.lock() {
             *errors = None;
         }
 
+        let sink = CaptureSink {
+            sender,
+            dropped: Arc::clone(&self.dropped_samples),
+            errors: Arc::clone(&self.stream_errors),
+            timing: Arc::clone(&self.timing),
+        };
         let stream = match sample_format {
-            SampleFormat::F32 => build_stream::<f32>(
-                &device,
-                &config,
-                channels,
-                sender,
-                Arc::clone(&self.dropped_samples),
-                Arc::clone(&self.stream_errors),
-                normalize_f32,
-            )?,
-            SampleFormat::I16 => build_stream::<i16>(
-                &device,
-                &config,
-                channels,
-                sender,
-                Arc::clone(&self.dropped_samples),
-                Arc::clone(&self.stream_errors),
-                normalize_i16,
-            )?,
-            SampleFormat::U16 => build_stream::<u16>(
-                &device,
-                &config,
-                channels,
-                sender,
-                Arc::clone(&self.dropped_samples),
-                Arc::clone(&self.stream_errors),
-                normalize_u16,
-            )?,
+            SampleFormat::F32 => {
+                build_stream::<f32>(&device, &config, self.first_channel, sink, normalize_f32)?
+            }
+            SampleFormat::I16 => {
+                build_stream::<i16>(&device, &config, self.first_channel, sink, normalize_i16)?
+            }
+            SampleFormat::U16 => {
+                build_stream::<u16>(&device, &config, self.first_channel, sink, normalize_u16)?
+            }
+            SampleFormat::I32 => {
+                build_stream::<i32>(&device, &config, self.first_channel, sink, normalize_i32)?
+            }
+            SampleFormat::F64 => {
+                build_stream::<f64>(&device, &config, self.first_channel, sink, normalize_f64)?
+            }
             _ => {
                 return Err(AudioInputError::UnsupportedInput(format!(
                     "{sample_format:?} PCM は未対応です"
@@ -366,23 +488,46 @@ impl AudioInput {
 fn build_stream<T>(
     device: &Device,
     config: &StreamConfig,
-    channels: usize,
-    sender: SyncSender<f32>,
-    dropped_samples: Arc<AtomicUsize>,
-    stream_errors: Arc<Mutex<Option<String>>>,
+    first_channel: usize,
+    sink: CaptureSink,
     normalize: fn(T) -> f32,
 ) -> Result<Stream, AudioInputError>
 where
     T: SizedSample + Copy + Send + 'static,
 {
+    let channels = usize::from(config.channels);
+    let mut sequence = 0;
+    let mut previous_callback: Option<Instant> = None;
     device
         .build_input_stream(
             config,
             move |data: &[T], _| {
-                enqueue_mono_samples(data, channels, &sender, &dropped_samples, normalize);
+                let callback_at = Instant::now();
+                sink.timing
+                    .frames
+                    .store(data.len() / channels, Ordering::Relaxed);
+                if let Some(previous) = previous_callback {
+                    sink.timing.interval_us.store(
+                        callback_at.saturating_duration_since(previous).as_micros() as usize,
+                        Ordering::Relaxed,
+                    );
+                }
+                previous_callback = Some(callback_at);
+                for frame in data.chunks_exact(channels) {
+                    let value = mono_sample(frame, first_channel, normalize);
+                    let sample = CapturedSample {
+                        value,
+                        callback_at,
+                        sequence,
+                    };
+                    sequence = sequence.wrapping_add(1);
+                    if sink.sender.try_send(sample).is_err() {
+                        sink.dropped.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
             },
             move |error| {
-                if let Ok(mut errors) = stream_errors.lock() {
+                if let Ok(mut errors) = sink.errors.lock() {
                     *errors = Some(error.to_string());
                 }
             },
@@ -391,23 +536,12 @@ where
         .map_err(AudioInputError::BuildStream)
 }
 
-fn enqueue_mono_samples<T: Copy>(
-    data: &[T],
-    channels: usize,
-    sender: &SyncSender<f32>,
-    dropped_samples: &AtomicUsize,
-    normalize: fn(T) -> f32,
-) {
-    for frame in data.chunks_exact(channels) {
-        let mono = match channels {
-            1 => normalize(frame[0]),
-            2 => (normalize(frame[0]) + normalize(frame[1])) * 0.5,
-            _ => return,
-        };
-
-        if sender.try_send(mono).is_err() {
-            dropped_samples.fetch_add(1, Ordering::Relaxed);
-        }
+fn mono_sample<T: Copy>(frame: &[T], first_channel: usize, normalize: fn(T) -> f32) -> f32 {
+    let first = normalize(frame[first_channel]);
+    if let Some(second) = frame.get(first_channel + 1) {
+        (first + normalize(*second)) * 0.5
+    } else {
+        first
     }
 }
 
@@ -423,6 +557,18 @@ fn normalize_i16(sample: i16) -> f32 {
     (sample as f32 / 32_768.0).clamp(-1.0, 1.0)
 }
 
+fn normalize_i32(sample: i32) -> f32 {
+    (sample as f64 / 2_147_483_648.0) as f32
+}
+
+fn normalize_f64(sample: f64) -> f32 {
+    if sample.is_finite() {
+        sample.clamp(-1.0, 1.0) as f32
+    } else {
+        0.0
+    }
+}
+
 fn normalize_u16(sample: u16) -> f32 {
     (sample as f32 / 32_767.5 - 1.0).clamp(-1.0, 1.0)
 }
@@ -433,23 +579,15 @@ mod tests {
 
     #[test]
     fn stereo_capture_averages_channels_before_analysis() {
-        let (sender, receiver) = sync_channel(4);
-        let dropped = AtomicUsize::new(0);
-        enqueue_mono_samples(&[0.8, 0.2, -0.6, 0.2], 2, &sender, &dropped, normalize_f32);
-        let samples: Vec<_> = receiver.try_iter().collect();
-        assert_eq!(samples.len(), 2);
-        assert!((samples[0] - 0.5).abs() < 0.0001);
-        assert!((samples[1] + 0.2).abs() < 0.0001);
-        assert_eq!(dropped.load(Ordering::Relaxed), 0);
+        assert!((mono_sample(&[0.8, 0.2], 0, normalize_f32) - 0.5).abs() < 0.0001);
+        assert!((mono_sample(&[-0.6, 0.2], 0, normalize_f32) + 0.2).abs() < 0.0001);
     }
 
     #[test]
-    fn full_capture_buffer_drops_samples_without_blocking() {
-        let (sender, receiver) = sync_channel(1);
-        let dropped = AtomicUsize::new(0);
-        enqueue_mono_samples(&[0.25, 0.5, 0.75], 1, &sender, &dropped, normalize_f32);
-        assert_eq!(receiver.try_recv().unwrap(), 0.25);
-        assert_eq!(dropped.load(Ordering::Relaxed), 2);
+    fn multichannel_capture_reads_the_selected_pair_or_last_mono_channel() {
+        let frame = [1.0, 1.0, 0.2, 0.6, -0.5];
+        assert!((mono_sample(&frame, 2, normalize_f32) - 0.4).abs() < 0.0001);
+        assert_eq!(mono_sample(&frame, 4, normalize_f32), -0.5);
     }
 
     #[test]
@@ -459,5 +597,10 @@ mod tests {
         assert_eq!(normalize_u16(u16::MAX), 1.0);
         assert_eq!(normalize_f32(f32::NAN), 0.0);
         assert_eq!(normalize_f32(f32::INFINITY), 0.0);
+        assert_eq!(normalize_i32(i32::MIN), -1.0);
+        assert_eq!(normalize_i32(i32::MAX), 1.0);
+        assert_eq!(normalize_f64(f64::NAN), 0.0);
+        assert_eq!(normalize_f64(f64::INFINITY), 0.0);
+        assert_eq!(normalize_f64(2.0), 1.0);
     }
 }

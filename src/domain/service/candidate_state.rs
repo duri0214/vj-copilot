@@ -75,15 +75,6 @@ impl CandidateState {
         }
     }
 
-    pub fn toggle_hold(&mut self) {
-        if self.held {
-            self.release();
-        } else {
-            self.held = true;
-            self.selected_slot = None;
-        }
-    }
-
     pub fn release(&mut self) {
         self.held = false;
         self.selected_slot = None;

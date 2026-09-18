@@ -11,10 +11,10 @@ use eframe::egui::{
 use crate::{
     domain::{
         service::{rank_clips, AnalysisTick, CandidateRefresh, CandidateState, PREVIEW_SLOT_COUNT},
-        valueobject::{AnalysisReading, ClipId, FeatureVector},
+        valueobject::{AnalysisReading, AudioLevels, ClipId, FeatureVector, TempoReading},
     },
     infra::{
-        analysis_worker::{AnalysisWorker, INPUT_IDLE_TIMEOUT},
+        analysis_worker::{AnalysisUpdate, AnalysisWorker, INPUT_IDLE_TIMEOUT},
         audio_input::{AudioInput, AudioSource, InputStatus},
         media::{
             MediaClip, MediaLibrary, MediaLoadReport, VIDEO_FRAMES_PER_SECOND, VIDEO_HEIGHT,
@@ -25,7 +25,11 @@ use crate::{
 
 use super::{level_meter::LevelMeter, theme};
 
+#[cfg(all(windows, feature = "asio"))]
+use crate::infra::audio_input::AudioBackend;
+
 const THUMBNAIL_SIZE: Vec2 = Vec2::new(112.0, 63.0);
+const SCROLL_CONTENT_RIGHT_MARGIN: f32 = 20.0;
 
 pub struct AppConfig {
     pub media_dir: Option<PathBuf>,
@@ -41,8 +45,13 @@ pub struct VjApp {
     demo: bool,
     audio_input: AudioInput,
     analysis_worker: Option<AnalysisWorker>,
-    analysis_ticks: Vec<AnalysisTick>,
+    analysis_ticks: Vec<AnalysisUpdate>,
+    processing_ms: Option<f32>,
+    display_ms: Option<f32>,
     latest_reading: Option<AnalysisReading>,
+    latest_levels: Option<AudioLevels>,
+    tempo: TempoReading,
+    last_beat_at: Option<Instant>,
     last_reading_at: Option<Instant>,
     level_meter: LevelMeter,
     latest_search_features: Option<FeatureVector>,
@@ -67,7 +76,12 @@ impl VjApp {
             audio_input: AudioInput::new(),
             analysis_worker: config.demo.then(AnalysisWorker::start_demo),
             analysis_ticks: Vec::with_capacity(32),
+            processing_ms: None,
+            display_ms: None,
             latest_reading: None,
+            latest_levels: None,
+            tempo: TempoReading::default(),
+            last_beat_at: None,
             last_reading_at: None,
             level_meter: LevelMeter::new(now),
             latest_search_features: None,
@@ -94,9 +108,25 @@ impl VjApp {
             ticks.clear();
         }
         let mut received_search_features = false;
-        for tick in ticks.drain(..) {
-            self.last_reading_at = Some(now);
-            received_search_features |= self.record_analysis_tick(tick);
+        for update in ticks.drain(..) {
+            if now.saturating_duration_since(update.callback_at) >= INPUT_IDLE_TIMEOUT {
+                continue;
+            }
+            self.last_reading_at = Some(update.callback_at);
+            self.processing_ms = Some(
+                update
+                    .analyzed_at
+                    .saturating_duration_since(update.callback_at)
+                    .as_secs_f32()
+                    * 1_000.0,
+            );
+            self.display_ms = Some(
+                now.saturating_duration_since(update.callback_at)
+                    .as_secs_f32()
+                    * 1_000.0,
+            );
+            received_search_features |= self.record_analysis_tick(update.tick, update.callback_at);
+            self.level_meter.update(Some(update.tick.levels), now);
         }
         self.analysis_ticks = ticks;
         if self
@@ -109,10 +139,15 @@ impl VjApp {
         received_search_features
     }
 
-    fn record_analysis_tick(&mut self, tick: AnalysisTick) -> bool {
-        self.latest_reading = Some(tick.reading);
-        if !tick.reading.audible {
-            self.latest_search_features = None;
+    fn record_analysis_tick(&mut self, tick: AnalysisTick, now: Instant) -> bool {
+        self.latest_levels = Some(tick.levels);
+        self.tempo = tick.tempo;
+        if tick.tempo.beat {
+            self.last_beat_at = Some(now);
+        }
+        if let Some(reading) = tick.reading {
+            self.latest_reading = Some(reading);
+            self.latest_search_features = tick.search_features;
         }
         if let Some(features) = tick.search_features {
             self.latest_search_features = Some(features);
@@ -154,8 +189,8 @@ impl VjApp {
         if context.wants_keyboard_input() {
             return;
         }
-        if context.input(|input| input.key_pressed(Key::Space)) {
-            self.toggle_hold();
+        if self.candidates.is_held() && context.input(|input| input.key_pressed(Key::Space)) {
+            self.resume_auto_mode();
         }
 
         let selected_slot = context.input(|input| {
@@ -174,14 +209,10 @@ impl VjApp {
         }
     }
 
-    fn toggle_hold(&mut self) {
-        let was_held = self.candidates.is_held();
-        self.candidates.toggle_hold();
-
-        if was_held {
-            self.candidate_refresh.reset();
-            self.needs_candidate_refresh = true;
-        }
+    fn resume_auto_mode(&mut self) {
+        self.candidates.release();
+        self.candidate_refresh.reset();
+        self.needs_candidate_refresh = true;
     }
 
     fn advance_animation(&mut self, now: Instant) {
@@ -218,19 +249,43 @@ impl VjApp {
             }
         });
         if self.demo {
-            ui.label("デモ音源でプレビューを確認中");
+            ui.label("120 BPM のデモ音源でプレビューを確認中");
             return;
         }
 
         let capturing = self.audio_input.is_capturing();
         ui.add_enabled_ui(!capturing, |ui| {
-            let mut source = self.audio_input.source();
             ui.horizontal(|ui| {
+                #[cfg(all(windows, feature = "asio"))]
+                {
+                    let mut backend = self.audio_input.backend();
+                    ui.selectable_value(&mut backend, AudioBackend::System, "WASAPI");
+                    ui.selectable_value(&mut backend, AudioBackend::Asio, "ASIO");
+                    self.audio_input.select_backend(backend);
+                    ui.separator();
+                }
+                let mut source = self.audio_input.source();
                 #[cfg(windows)]
-                ui.selectable_value(&mut source, AudioSource::SystemPlayback, "PC 再生音");
+                if self.audio_input.supports_loopback() {
+                    ui.selectable_value(&mut source, AudioSource::SystemPlayback, "PC 再生音");
+                }
                 ui.selectable_value(&mut source, AudioSource::LineInput, "LINE / MIC");
+                self.audio_input.select_source(source);
             });
-            self.audio_input.select_source(source);
+            #[cfg(all(windows, feature = "asio"))]
+            if self.audio_input.backend() == AudioBackend::Asio {
+                let mut channel = self.audio_input.first_channel();
+                ui.horizontal(|ui| {
+                    ui.label("入力 ch");
+                    ui.add(egui::DragValue::new(&mut channel).range(1..=128));
+                    ui.label(
+                        RichText::new("隣の ch と mono に合成（最終 ch は単独）")
+                            .size(11.0)
+                            .color(theme::MUTED),
+                    );
+                });
+                self.audio_input.select_first_channel(channel);
+            }
         });
         ui.horizontal(|ui| {
             ui.add_enabled_ui(!capturing, |ui| {
@@ -281,22 +336,12 @@ impl VjApp {
                 }
             }
         });
-        match self.audio_input.source() {
-            #[cfg(windows)]
-            AudioSource::SystemPlayback => {
-                ui.label(
-                    RichText::new("iTunes と同じ出力先を選択 → 開始。PC の再生音を取り込みます。")
-                        .size(11.0)
-                        .color(theme::MUTED),
-                );
-            }
-            AudioSource::LineInput => {
-                ui.label(
-                    RichText::new("ミキサーの LINE 出力、またはマイクを取り込みます。")
-                        .size(11.0)
-                        .color(theme::MUTED),
-                );
-            }
+        if self.audio_input.source() == AudioSource::LineInput {
+            ui.label(
+                RichText::new("ミキサーの LINE 出力、またはマイクを取り込みます。")
+                    .size(11.0)
+                    .color(theme::MUTED),
+            );
         }
         let status_color = match self.audio_input.status() {
             InputStatus::Error(_) | InputStatus::Unsupported(_) | InputStatus::NoDevice => {
@@ -341,43 +386,112 @@ impl VjApp {
         }
     }
 
-    fn analysis_status(&self) -> &'static str {
+    fn show_tempo(&self, ui: &mut Ui, now: Instant) {
+        ui.horizontal(|ui| {
+            let lit = self.tempo.bpm.is_some()
+                && self.last_beat_at.is_some_and(|at| {
+                    now.saturating_duration_since(at) < Duration::from_millis(100)
+                });
+            let (rect, response) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
+            ui.painter().circle_filled(
+                rect.center(),
+                12.0,
+                theme::ACCENT.gamma_multiply(if lit { 0.25 } else { 0.04 }),
+            );
+            ui.painter().circle_filled(
+                rect.center(),
+                6.0,
+                if lit { theme::ACCENT } else { theme::BORDER },
+            );
+            response.on_hover_text("検出した拍で点灯します。推定中はタイミングが揺れることがあります。");
+            let bpm = self
+                .tempo
+                .bpm
+                .map_or_else(|| "--".to_owned(), |bpm| format!("{bpm:.1}"));
+            ui.add_sized(
+                Vec2::new(98.0, 38.0),
+                egui::Label::new(RichText::new(bpm).monospace().size(30.0).strong())
+                    .halign(egui::Align::RIGHT),
+            );
+            theme::caption(ui, "BPM");
+            let status = if self.latest_levels.is_none() {
+                "入力待ち"
+            } else if self.tempo.stable {
+                "安定"
+            } else {
+                "推定中"
+            };
+            theme::badge(
+                ui,
+                status,
+                if self.tempo.stable { theme::ACCENT } else { theme::AMBER },
+            );
+            ui.label(
+                RichText::new(format!("信頼度 {:.0}%", self.tempo.confidence * 100.0))
+                    .size(11.0)
+                    .color(theme::MUTED),
+            )
+            .on_hover_text("周期性の強さの目安です。BPM が正しい確率ではありません。半分・倍のテンポを拾う場合があります。");
+        });
+    }
+
+    fn show_timing(&self, ui: &mut Ui) {
+        if self.demo {
+            return;
+        }
+        egui::CollapsingHeader::new("入力タイミング / 検証").show(ui, |ui| {
+            if let Some(timing) = self.audio_input.timing() {
+                ui.label(
+                    RichText::new(format!(
+                        "コールバック: {:>8} frames / {:>8.1} ms 分の音声",
+                        timing.frames, timing.buffer_ms,
+                    ))
+                    .monospace(),
+                );
+                ui.label(
+                    RichText::new(format!("到着間隔: {:>8.1} ms", timing.interval_ms))
+                        .monospace(),
+                );
+            }
+            if let (Some(processing), Some(display)) = (self.processing_ms, self.display_ms) {
+                ui.label(
+                    RichText::new(format!(
+                        "受信 → 解析: {processing:>8.1} ms / 受信 → 描画要求: {display:>8.1} ms"
+                    ))
+                    .monospace(),
+                );
+            } else {
+                ui.label("入力を開始すると計測します。");
+            }
+            ui.label(
+                RichText::new("直近の値。機器・ドライバーの遅延、画面の表示遅延は含みません。音量の集計窓は 25 ms です。")
+                    .size(11.0)
+                    .color(theme::MUTED),
+            );
+        });
+    }
+
+    fn analysis_status(&self) -> String {
+        if let Some(slot) = self.candidates.selected_slot() {
+            return format!("候補 {} を選択中", slot + 1);
+        }
         if !self.demo && !self.audio_input.is_capturing() {
-            return "入力を開始すると候補を提案します";
+            return "入力を開始すると候補を提案します".to_owned();
         }
 
         match self.latest_reading {
             None => "音声待機中 — 音源の再生とデバイスを確認してください",
             Some(reading) if !reading.audible => "無音を検出: 候補を保持中",
             Some(_) if self.latest_search_features.is_none() => "有音入力を 1 秒分待機中",
-            Some(_) if self.candidates.is_held() => "候補更新を保留中",
             Some(_) => "候補を自動更新中",
         }
+        .to_owned()
     }
 
-    fn show_candidate_controls(&mut self, ui: &mut Ui) {
+    fn show_candidate_controls(&self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             theme::caption(ui, "02 / CLIP CANDIDATES");
             theme::badge(ui, &format!("{} CLIPS", self.library.len()), theme::MUTED);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let button_text = if self.candidates.is_held() {
-                    "HOLD / 解除"
-                } else {
-                    "AUTO / 保留"
-                };
-                let color = if self.candidates.is_held() {
-                    theme::AMBER
-                } else {
-                    theme::ACCENT
-                };
-                if ui
-                    .button(RichText::new(button_text).strong().color(color))
-                    .on_hover_text("Space で候補の自動更新を保留・解除")
-                    .clicked()
-                {
-                    self.toggle_hold();
-                }
-            });
         });
         ui.label(
             RichText::new(self.analysis_status())
@@ -389,7 +503,6 @@ impl VjApp {
     fn show_preview_grid(&mut self, ui: &mut Ui) {
         let candidate_ids = self.candidates.slots().clone();
         let selected_slot = self.candidates.selected_slot();
-        let is_held = self.candidates.is_held();
         let mut clicked_slot = None;
         let card_width = ((ui.available_width() - 12.0) / 2.0).floor();
 
@@ -404,7 +517,6 @@ impl VjApp {
                         slot_index,
                         clip,
                         selected_slot == Some(slot_index),
-                        is_held,
                         card_width,
                     );
                     if clicked {
@@ -435,6 +547,11 @@ impl VjApp {
 
     fn clear_analysis(&mut self) {
         self.latest_reading = None;
+        self.latest_levels = None;
+        self.tempo = TempoReading::default();
+        self.last_beat_at = None;
+        self.processing_ms = None;
+        self.display_ms = None;
         self.last_reading_at = None;
         self.latest_search_features = None;
     }
@@ -460,12 +577,23 @@ impl eframe::App for VjApp {
         self.handle_shortcuts(context);
         let received_search_features = self.collect_analysis_ticks(now);
         self.update_candidates(now, received_search_features);
-        self.level_meter.update(self.latest_reading, now);
+        self.level_meter.update(self.latest_levels, now);
 
         egui::CentralPanel::default()
-            .frame(Frame::new().fill(theme::BACKGROUND).inner_margin(20))
+            .frame(
+                Frame::new()
+                    .fill(theme::BACKGROUND)
+                    .inner_margin(egui::Margin {
+                        left: 20,
+                        right: 0,
+                        top: 20,
+                        bottom: 20,
+                    }),
+            )
             .show(context, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
+                let scroll_area = egui::ScrollArea::vertical().auto_shrink([false, true]);
+                scroll_area.show(ui, |ui| {
+                    ui.set_width((ui.available_width() - SCROLL_CONTENT_RIGHT_MARGIN).max(0.0));
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("VJ").size(25.0).strong().color(theme::ACCENT));
                         ui.label(RichText::new("COPILOT").size(25.0).strong());
@@ -483,15 +611,17 @@ impl eframe::App for VjApp {
                         ui.set_width(ui.available_width());
                         self.show_input_controls(ui);
                         ui.add_space(6.0);
-                        self.level_meter.show(ui, self.latest_reading, now);
+                        self.level_meter.show(ui, self.latest_levels, now);
+                        self.show_tempo(ui, now);
                         self.show_analysis(ui);
+                        self.show_timing(ui);
                     });
                     ui.add_space(8.0);
                     self.show_candidate_controls(ui);
                     self.show_preview_grid(ui);
                     ui.add_space(4.0);
                     ui.label(
-                        RichText::new("1—4  選択     SPACE  保留 / 解除")
+                        RichText::new("1—4  選択     SPACE  選択解除")
                             .monospace()
                             .size(11.0)
                             .color(theme::MUTED),
@@ -544,13 +674,10 @@ impl PreviewSlot {
         slot_index: usize,
         clip: Option<&MediaClip>,
         selected: bool,
-        held: bool,
         width: f32,
     ) -> bool {
         let stroke = if selected {
             Stroke::new(1.0_f32, theme::ACCENT)
-        } else if held {
-            Stroke::new(1.0_f32, theme::AMBER.gamma_multiply(0.6))
         } else {
             Stroke::new(1.0_f32, theme::BORDER)
         };

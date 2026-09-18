@@ -26,7 +26,10 @@ impl DemoInput {
 
         for _ in 0..count {
             let (frequency_hz, amplitude) = self.current_signal();
-            samples.push(amplitude * self.phase.sin());
+            let beat_phase = (self.sample_index % (u64::from(DEMO_SAMPLE_RATE) / 2)) as f32
+                / DEMO_SAMPLE_RATE as f32;
+            let pulse = 0.1 + 0.9 * (-beat_phase * 24.0).exp();
+            samples.push(amplitude * pulse * self.phase.sin());
             self.phase = (self.phase
                 + 2.0 * std::f32::consts::PI * frequency_hz / DEMO_SAMPLE_RATE as f32)
                 .rem_euclid(2.0 * std::f32::consts::PI);

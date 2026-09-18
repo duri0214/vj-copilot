@@ -55,10 +55,23 @@ impl FeatureVector {
 #[derive(Clone, Copy, Debug)]
 pub struct AnalysisReading {
     pub features: FeatureVector,
-    pub rms_dbfs: f32,
-    pub peak_dbfs: f32,
     pub centroid_hz: f32,
     pub audible: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct AudioLevels {
+    pub rms_dbfs: f32,
+    pub peak_dbfs: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TempoReading {
+    pub bpm: Option<f32>,
+    pub confidence: f32,
+    pub stable: bool,
+    /// A detected onset, limited to roughly one pulse per estimated beat.
+    pub beat: bool,
 }
 
 fn validate_unit_interval(name: &'static str, value: f32) -> Result<(), FeatureValueError> {
