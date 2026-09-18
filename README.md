@@ -83,6 +83,8 @@ FFT の正のスペクトル変化（log spectral flux）から立ち上がり�
 
 `--features asio` はビルド時に必須です。feature を付けない `cargo run --release -- --media-dir .\demo-media` は WASAPI 版として起動するため、画面に ASIO ボタンは表示されません。
 
+初回は、Rust stable MSVC と Visual Studio C++ Build Tools、展開済み ASIO SDK、LLVM の `libclang.dll` を準備してから、プロジェクト直下で `.\scripts\build-asio.ps1` を実行します。1〜3 の資材がまだ無い状態でスクリプトを先に実行しても、不足ファイルと配置先が表示されます。
+
 プロジェクト内に次のビルド資材を配置します。`tools\` 以下は `.gitignore` 対象で、SDKやLLVMのバイナリをGitへコミットしません。
 
 ```text

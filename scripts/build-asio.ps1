@@ -33,6 +33,11 @@ $requiredFiles = @(
 $missingFiles = @($requiredFiles | Where-Object { -not (Test-Path -LiteralPath $_.Path -PathType Leaf) })
 if ($missingFiles.Count -gt 0) {
     Write-Host "ASIO ビルドの準備が不足しています。" -ForegroundColor Red
+    Write-Host "ASIO版を初めてビルドする場合は、次を準備してください:" -ForegroundColor Yellow
+    Write-Host "  1. Rust の stable MSVC toolchain と Visual Studio C++ Build Tools"
+    Write-Host "  2. 展開済み ASIO SDK（common と host を含む）"
+    Write-Host "  3. LLVM の bin\libclang.dll"
+    Write-Host ""
     Write-Host "次のファイルをプロジェクト内へ配置してください:" -ForegroundColor Yellow
     foreach ($missingFile in $missingFiles) {
         Write-Host ("  - {0}: {1}" -f $missingFile.Description, $missingFile.Path)
