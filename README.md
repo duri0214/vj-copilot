@@ -177,4 +177,27 @@ cargo test --all-targets --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
+## Background と Foreground 素材
+
+`--media-dir` を指定して起動すると、素材フォルダ内に次の役割別フォルダを作成します。
+
+```text
+media-dir/
+├─ background/
+│  ├─ clips.json
+│  └─ background-01.mp4
+└─ foreground/
+   └─ miku-right.png
+```
+
+Background の MP4 と `clips.json` は `background/` に置きます。Foreground は `foreground/` 直下に、1920×1080 の RGBA PNG を置いてください。透明キャンバス上で配置した位置をそのまま STAGE に対応させます。子フォルダ内の PNG と、サイズが異なる PNG は読み込みません。
+
+STAGE では、選択した Background の上に Foreground を 1 枚だけ合成します。Foreground を選び替えると置き換わり、`CLEAR` で Background のみへ戻ります。PNG の不透明領域の中心を軸に、回転ドア風の固定ループモーションを適用します。
+
+既存のダミー素材は次で新しいフォルダ構成へ生成します。
+
+```powershell
+.\scripts\generate-demo-media.ps1
+```
+
 合成 PCM による 90 / 120 / 150 BPM、拍間隔、無音・一定音・ノイズ、テンポ変更、25 ms の音量更新、PCM 変換と入力チャンネル選択、音声欠落時のリセットを検証します。ASIO ドライバーの実入力と物理遅延は自動テストの対象外です。
