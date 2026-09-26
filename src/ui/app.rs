@@ -770,12 +770,12 @@ impl eframe::App for VjApp {
                         self.show_timing(ui);
                     });
                     ui.add_space(8.0);
-                    self.show_stage(ui, now);
-                    ui.add_space(8.0);
                     self.show_candidate_controls(ui);
                     self.show_preview_grid(ui);
                     ui.add_space(8.0);
                     self.show_foreground_controls(ui);
+                    ui.add_space(8.0);
+                    self.show_stage(ui, now);
                     ui.add_space(4.0);
                     ui.label(
                         RichText::new("1—4  選択     SPACE  選択解除")
