@@ -200,4 +200,6 @@ STAGE では、選択した Background の上に Foreground を 1 枚だけ合�
 .\scripts\generate-demo-media.ps1
 ```
 
+リポジトリには `demo-media/foreground/neon-prism-right.png` を同梱しています。スクリプト実行後、`--demo` を付けて起動し、Background を選んだうえで `neon-prism-right.png` を選択すると二層表示を試せます。
+
 合成 PCM による 90 / 120 / 150 BPM、拍間隔、無音・一定音・ノイズ、テンポ変更、25 ms の音量更新、PCM 変換と入力チャンネル選択、音声欠落時のリセットを検証します。ASIO ドライバーの実入力と物理遅延は自動テストの対象外です。
