@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     path::PathBuf,
     time::{Duration, Instant},
 };
@@ -71,6 +72,7 @@ pub struct VjApp {
     preview_window_open: bool,
     stage_texture: Option<TextureHandle>,
     foreground_texture: Option<(String, TextureHandle)>,
+    foreground_preview_textures: HashMap<String, TextureHandle>,
     started_at: Instant,
     last_animation_at: Instant,
 }
@@ -106,6 +108,7 @@ impl VjApp {
             preview_window_open: true,
             stage_texture: None,
             foreground_texture: None,
+            foreground_preview_textures: HashMap::new(),
             started_at: now,
             last_animation_at: now,
         }
@@ -386,15 +389,90 @@ impl VjApp {
             .iter()
             .map(|foreground| foreground.name.clone())
             .collect::<Vec<_>>();
-        ui.horizontal_wrapped(|ui| {
-            for (index, name) in names.into_iter().enumerate() {
-                let selected = self.selected_foreground.as_deref() == Some(name.as_str());
-                let label = format!("{}  {}", index + 1, name);
-                if ui.selectable_label(selected, label).clicked() {
-                    self.selected_foreground = if selected { None } else { Some(name) };
+        self.show_foreground_grid(ui, &names);
+    }
+
+    fn show_foreground_grid(&mut self, ui: &mut Ui, names: &[String]) {
+        let card_width = ((ui.available_width() - 12.0) / 2.0).floor();
+        for (row_index, row) in names.chunks(2).enumerate() {
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 12.0;
+                for (column_index, name) in row.iter().enumerate() {
+                    let index = row_index * 2 + column_index;
+                    let selected = self.selected_foreground.as_deref() == Some(name.as_str());
+                    let texture = self
+                        .foreground_preview_textures
+                        .entry(name.clone())
+                        .or_insert_with(|| {
+                            let foreground = self
+                                .library
+                                .foreground(name)
+                                .expect("foreground name from library");
+                            let image = egui::ColorImage::from_rgba_unmultiplied(
+                                [VIDEO_WIDTH, VIDEO_HEIGHT],
+                                &foreground.rgba,
+                            );
+                            ui.ctx().load_texture(
+                                format!("foreground-preview-{name}"),
+                                image,
+                                TextureOptions::LINEAR,
+                            )
+                        })
+                        .clone();
+                    let response = Frame::new()
+                        .fill(if selected {
+                            egui::Color32::from_rgb(24, 48, 49)
+                        } else {
+                            theme::PANEL
+                        })
+                        .stroke(Stroke::new(
+                            if selected { 2.0_f32 } else { 1.0_f32 },
+                            if selected {
+                                theme::ACCENT
+                            } else {
+                                theme::BORDER
+                            },
+                        ))
+                        .corner_radius(8)
+                        .inner_margin(12)
+                        .show(ui, |ui| {
+                            ui.set_width(card_width - 28.0);
+                            ui.horizontal(|ui| {
+                                ui.add(Image::new((texture.id(), THUMBNAIL_SIZE)).corner_radius(4));
+                                ui.vertical(|ui| {
+                                    theme::badge(
+                                        ui,
+                                        &(index + 1).to_string(),
+                                        if selected {
+                                            theme::ACCENT
+                                        } else {
+                                            theme::MUTED
+                                        },
+                                    );
+                                    ui.add(
+                                        egui::Label::new(RichText::new(name).size(12.0).strong())
+                                            .truncate(),
+                                    );
+                                    ui.label(
+                                        RichText::new("クリックで選択")
+                                            .size(10.0)
+                                            .color(theme::MUTED),
+                                    );
+                                });
+                            });
+                        })
+                        .response;
+                    let response = ui.interact(
+                        response.rect,
+                        ui.id().with(("foreground", index)),
+                        Sense::click(),
+                    );
+                    if response.clicked() {
+                        self.selected_foreground = if selected { None } else { Some(name.clone()) };
+                    }
                 }
-            }
-        });
+            });
+        }
     }
 
     fn show_preview_window_button(&mut self, ui: &mut Ui) {
