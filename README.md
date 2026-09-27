@@ -22,10 +22,10 @@ ffmpeg -version
 
 ## 2. Background 素材を生成する
 
-次のスクリプトは、指定した出力先（省略時は `demo-media`）の `background` に 8 本のサンプル MP4 と `background-metadata.json` を生成します。`demo-media` はサンプル素材を置くフォルダ名の一例です。
+次のスクリプトは、指定した出力先（省略時は `demo-media`）の `background` にサンプル MP4 と `background-metadata.json` を生成します。主な成果物は素材の対応を記録する `background-metadata.json` です。`demo-media` はサンプル素材を置くフォルダ名の一例です。
 
 ```powershell
-.\scripts\generate-background-media.ps1
+.\scripts\generate-background-metadata.ps1
 ```
 
 同梱の `demo-media\foreground\neon-prism-right.png` と合わせて、Background と Foreground の表示をすぐに試せます。生成した MP4 は Git 管理外です。別のフォルダへ生成する場合は `-OutputDir` を指定します。
