@@ -121,12 +121,12 @@ pub fn load_media_directory(media_dir: Option<&Path>) -> MediaLoadReport {
         }
     };
 
-    let manifest_path = background_dir.join("clips.json");
+    let manifest_path = background_dir.join("background-metadata.json");
     let manifest_text = match fs::read_to_string(&manifest_path) {
         Ok(text) => text,
         Err(error) => {
             report.notices.push(format!(
-                "clips.json を読めません: {} ({error})",
+                "background-metadata.json を読めません: {} ({error})",
                 manifest_path.display()
             ));
             return report;
@@ -135,9 +135,9 @@ pub fn load_media_directory(media_dir: Option<&Path>) -> MediaLoadReport {
     let manifest: Vec<ManifestEntry> = match serde_json::from_str(&manifest_text) {
         Ok(manifest) => manifest,
         Err(error) => {
-            report
-                .notices
-                .push(format!("clips.json の形式が不正です: {error}"));
+            report.notices.push(format!(
+                "background-metadata.json の形式が不正です: {error}"
+            ));
             return report;
         }
     };
@@ -194,7 +194,7 @@ pub fn load_media_directory(media_dir: Option<&Path>) -> MediaLoadReport {
     for file_name in mp4_files.keys() {
         if !referenced_files.contains(file_name) {
             report.notices.push(format!(
-                "MP4 を除外しました（clips.json に metadata がありません）: {file_name}"
+                "MP4 を除外しました（background-metadata.json に metadata がありません）: {file_name}"
             ));
         }
     }
@@ -410,6 +410,10 @@ mod tests {
         assert!(directory.join("background").is_dir());
         assert!(directory.join("foreground").is_dir());
         assert_eq!(report.library.len(), 0);
+        assert!(report
+            .notices
+            .iter()
+            .any(|notice| notice.contains("background-metadata.json を読めません")));
         fs::remove_dir_all(directory).unwrap();
     }
 
