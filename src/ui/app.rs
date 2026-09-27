@@ -692,10 +692,6 @@ impl VjApp {
     }
 
     fn show_candidate_controls(&self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            theme::caption(ui, "02 / BACKGROUND");
-            theme::badge(ui, &format!("{} CLIPS", self.library.len()), theme::MUTED);
-        });
         ui.label(
             RichText::new(self.analysis_status())
                 .size(11.0)
@@ -736,13 +732,16 @@ impl VjApp {
 
     fn show_media_tabs(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
+            let background_label = format!("02 / BACKGROUND ({})", self.library.len());
             let background =
-                ui.selectable_label(self.media_tab == MediaTab::Background, "02 / BACKGROUND");
+                ui.selectable_label(self.media_tab == MediaTab::Background, background_label);
             if background.clicked() {
                 self.media_tab = MediaTab::Background;
             }
+            let foreground_label =
+                format!("03 / FOREGROUND ({})", self.library.foregrounds().len());
             let foreground =
-                ui.selectable_label(self.media_tab == MediaTab::Foreground, "03 / FOREGROUND");
+                ui.selectable_label(self.media_tab == MediaTab::Foreground, foreground_label);
             if foreground.clicked() {
                 self.media_tab = MediaTab::Foreground;
             }
