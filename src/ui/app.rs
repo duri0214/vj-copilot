@@ -1,11 +1,12 @@
 use std::{
+    collections::HashMap,
     path::PathBuf,
     time::{Duration, Instant},
 };
 
 use eframe::egui::{
     self, pos2, Context, Frame, Image, Key, Mesh, Rect, RichText, Sense, Shape, Stroke,
-    TextureHandle, TextureOptions, Ui, Vec2,
+    TextureHandle, TextureOptions, Ui, Vec2, ViewportBuilder, ViewportId,
 };
 
 use crate::{
@@ -17,8 +18,8 @@ use crate::{
         analysis_worker::{AnalysisUpdate, AnalysisWorker, INPUT_IDLE_TIMEOUT},
         audio_input::{AudioInput, AudioSource, InputStatus},
         media::{
-            MediaClip, MediaLibrary, MediaLoadReport, VIDEO_FRAMES_PER_SECOND, VIDEO_HEIGHT,
-            VIDEO_WIDTH,
+            MediaClip, MediaLibrary, MediaLoadReport, FOREGROUND_HEIGHT, FOREGROUND_WIDTH,
+            VIDEO_FRAMES_PER_SECOND, VIDEO_HEIGHT, VIDEO_WIDTH,
         },
     },
 };
@@ -29,8 +30,14 @@ use super::{level_meter::LevelMeter, theme};
 use crate::infra::audio_input::AudioBackend;
 
 const THUMBNAIL_SIZE: Vec2 = Vec2::new(112.0, 63.0);
-const STAGE_PREVIEW_WIDTH: f32 = 240.0;
+const STAGE_PREVIEW_WIDTH: f32 = 960.0;
 const SCROLL_CONTENT_RIGHT_MARGIN: f32 = 20.0;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MediaTab {
+    Background,
+    Foreground,
+}
 
 pub struct AppConfig {
     pub media_dir: Option<PathBuf>,
@@ -61,8 +68,11 @@ pub struct VjApp {
     needs_candidate_refresh: bool,
     preview_slots: [PreviewSlot; PREVIEW_SLOT_COUNT],
     selected_foreground: Option<String>,
+    media_tab: MediaTab,
+    preview_window_open: bool,
     stage_texture: Option<TextureHandle>,
     foreground_texture: Option<(String, TextureHandle)>,
+    foreground_preview_textures: HashMap<String, TextureHandle>,
     started_at: Instant,
     last_animation_at: Instant,
 }
@@ -94,8 +104,11 @@ impl VjApp {
             needs_candidate_refresh: false,
             preview_slots: std::array::from_fn(|_| PreviewSlot::default()),
             selected_foreground: None,
+            media_tab: MediaTab::Background,
+            preview_window_open: true,
             stage_texture: None,
             foreground_texture: None,
+            foreground_preview_textures: HashMap::new(),
             started_at: now,
             last_animation_at: now,
         }
@@ -196,8 +209,28 @@ impl VjApp {
         if context.wants_keyboard_input() {
             return;
         }
-        if self.candidates.is_held() && context.input(|input| input.key_pressed(Key::Space)) {
-            self.resume_auto_mode();
+        let tab_direction = context.input(|input| {
+            if input.key_pressed(Key::ArrowLeft) {
+                Some(-1_i8)
+            } else if input.key_pressed(Key::ArrowRight) {
+                Some(1_i8)
+            } else {
+                None
+            }
+        });
+        if let Some(direction) = tab_direction {
+            self.media_tab = match (self.media_tab, direction) {
+                (MediaTab::Background, _) => MediaTab::Foreground,
+                (MediaTab::Foreground, _) => MediaTab::Background,
+            };
+        }
+        let space_pressed = context.input(|input| input.key_pressed(Key::Space));
+        if space_pressed {
+            match self.media_tab {
+                MediaTab::Background if self.candidates.is_held() => self.resume_auto_mode(),
+                MediaTab::Foreground => self.selected_foreground = None,
+                _ => {}
+            }
         }
 
         let selected_slot = context.input(|input| {
@@ -206,8 +239,24 @@ impl VjApp {
                 .position(|key| input.key_pressed(*key))
         });
         if let Some(slot) = selected_slot {
-            self.select_slot(slot);
+            match self.media_tab {
+                MediaTab::Background => self.select_slot(slot),
+                MediaTab::Foreground => self.select_foreground_slot(slot),
+            }
         }
+    }
+
+    fn select_foreground_slot(&mut self, slot: usize) {
+        let selected = self
+            .library
+            .foregrounds()
+            .get(slot)
+            .map(|foreground| foreground.name.clone());
+        self.selected_foreground = if selected == self.selected_foreground {
+            None
+        } else {
+            selected
+        };
     }
 
     fn select_slot(&mut self, slot: usize) {
@@ -245,10 +294,6 @@ impl VjApp {
     }
 
     fn show_stage(&mut self, ui: &mut Ui, now: Instant) {
-        ui.horizontal(|ui| {
-            theme::caption(ui, "STAGE");
-            theme::badge(ui, "PREVIEW ONLY", theme::MUTED);
-        });
         let width = ui.available_width().min(STAGE_PREVIEW_WIDTH);
         let size = Vec2::new(width, width * 9.0 / 16.0);
         let (response, painter) = ui.allocate_painter(size, Sense::hover());
@@ -281,30 +326,25 @@ impl VjApp {
                 painter.image(
                     texture.id(),
                     response.rect,
-                    Rect::EVERYTHING,
+                    Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
                     egui::Color32::WHITE,
                 );
             }
-        } else {
-            painter.text(
-                response.rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "Select a background clip",
-                egui::FontId::proportional(13.0),
-                theme::MUTED,
-            );
         }
 
-        if let Some(opaque_center) = self.update_foreground_texture(ui.ctx()) {
-            self.paint_foreground(&painter, response.rect, opaque_center, now);
+        if self.update_foreground_texture(ui.ctx()) {
+            self.paint_foreground(&painter, response.rect, now);
         }
         response.on_hover_text("STAGE preview");
     }
 
-    fn update_foreground_texture(&mut self, context: &Context) -> Option<[f32; 2]> {
-        let name = self.selected_foreground.clone()?;
-        let foreground = self.library.foreground(&name)?;
-        let opaque_center = foreground.opaque_center;
+    fn update_foreground_texture(&mut self, context: &Context) -> bool {
+        let Some(name) = self.selected_foreground.clone() else {
+            return false;
+        };
+        let Some(foreground) = self.library.foreground(&name) else {
+            return false;
+        };
         let existing = self.foreground_texture.take();
         self.foreground_texture = Some(match existing {
             Some((existing_name, texture)) if existing_name == name => (existing_name, texture),
@@ -317,16 +357,10 @@ impl VjApp {
                 )
             }
         });
-        Some(opaque_center)
+        true
     }
 
-    fn paint_foreground(
-        &self,
-        painter: &egui::Painter,
-        stage: Rect,
-        opaque_center: [f32; 2],
-        now: Instant,
-    ) {
+    fn paint_foreground(&self, painter: &egui::Painter, stage: Rect, now: Instant) {
         let Some((_, texture)) = &self.foreground_texture else {
             return;
         };
@@ -334,11 +368,15 @@ impl VjApp {
             * std::f32::consts::TAU
             / 3.0;
         let horizontal_scale = phase.cos();
-        let axis_x = stage.left() + stage.width() * opaque_center[0];
-        let x_at_canvas_left = axis_x - stage.width() * opaque_center[0] * horizontal_scale;
+        let axis_x = stage.center().x;
+        let x_at_canvas_left = axis_x - stage.width() * 0.5 * horizontal_scale;
         let x_at_canvas_right = x_at_canvas_left + stage.width() * horizontal_scale;
         let (left, right, uv) = if x_at_canvas_left <= x_at_canvas_right {
-            (x_at_canvas_left, x_at_canvas_right, Rect::EVERYTHING)
+            (
+                x_at_canvas_left,
+                x_at_canvas_right,
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+            )
         } else {
             (
                 x_at_canvas_right,
@@ -356,17 +394,7 @@ impl VjApp {
     }
 
     fn show_foreground_controls(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            theme::caption(ui, "03 / FOREGROUND");
-            theme::badge(
-                ui,
-                &format!("{} PNG", self.library.foregrounds().len()),
-                theme::MUTED,
-            );
-            if ui.button("CLEAR").clicked() {
-                self.selected_foreground = None;
-            }
-        });
+        ui.label(RichText::new("候補を選択").size(11.0).color(theme::MUTED));
         if self.library.foregrounds().is_empty() {
             ui.label(
                 RichText::new("foreground/ に 1920x1080 RGBA PNG を追加してください")
@@ -381,14 +409,133 @@ impl VjApp {
             .iter()
             .map(|foreground| foreground.name.clone())
             .collect::<Vec<_>>();
-        ui.horizontal_wrapped(|ui| {
-            for name in names {
-                let selected = self.selected_foreground.as_deref() == Some(name.as_str());
-                if ui.selectable_label(selected, &name).clicked() {
-                    self.selected_foreground = Some(name);
+        self.show_foreground_grid(ui, &names);
+    }
+
+    fn show_foreground_grid(&mut self, ui: &mut Ui, names: &[String]) {
+        let card_width = ((ui.available_width() - 12.0) / 2.0).floor();
+        for (row_index, row) in names.chunks(2).enumerate() {
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 12.0;
+                for (column_index, name) in row.iter().enumerate() {
+                    let index = row_index * 2 + column_index;
+                    let selected = self.selected_foreground.as_deref() == Some(name.as_str());
+                    let texture = self
+                        .foreground_preview_textures
+                        .entry(name.clone())
+                        .or_insert_with(|| {
+                            let foreground = self
+                                .library
+                                .foreground(name)
+                                .expect("foreground name from library");
+                            let image = egui::ColorImage::from_rgba_unmultiplied(
+                                [FOREGROUND_WIDTH, FOREGROUND_HEIGHT],
+                                &foreground.rgba,
+                            );
+                            ui.ctx().load_texture(
+                                format!("foreground-preview-{name}"),
+                                image,
+                                TextureOptions::LINEAR,
+                            )
+                        })
+                        .clone();
+                    let response = Frame::new()
+                        .fill(if selected {
+                            egui::Color32::from_rgb(24, 48, 49)
+                        } else {
+                            theme::PANEL
+                        })
+                        .stroke(Stroke::new(
+                            if selected { 2.0_f32 } else { 1.0_f32 },
+                            if selected {
+                                theme::ACCENT
+                            } else {
+                                theme::BORDER
+                            },
+                        ))
+                        .corner_radius(8)
+                        .inner_margin(12)
+                        .show(ui, |ui| {
+                            ui.set_width(card_width - 28.0);
+                            ui.horizontal(|ui| {
+                                ui.add(Image::new((texture.id(), THUMBNAIL_SIZE)).corner_radius(4));
+                                ui.vertical(|ui| {
+                                    theme::badge(
+                                        ui,
+                                        &(index + 1).to_string(),
+                                        if selected {
+                                            theme::ACCENT
+                                        } else {
+                                            theme::MUTED
+                                        },
+                                    );
+                                    ui.add(
+                                        egui::Label::new(RichText::new(name).size(12.0).strong())
+                                            .truncate(),
+                                    );
+                                    ui.label(
+                                        RichText::new("クリックで選択")
+                                            .size(10.0)
+                                            .color(theme::MUTED),
+                                    );
+                                });
+                            });
+                        })
+                        .response;
+                    let response = ui.interact(
+                        response.rect,
+                        ui.id().with(("foreground", index)),
+                        Sense::click(),
+                    );
+                    if response.clicked() {
+                        self.selected_foreground = Some(name.clone());
+                    }
                 }
+            });
+        }
+    }
+
+    fn show_preview_window_button(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            theme::caption(ui, "STAGE OUTPUT");
+            if self.preview_window_open {
+                theme::badge(ui, "OPEN", theme::ACCENT);
+            } else if ui.button("OPEN STAGE WINDOW").clicked() {
+                self.preview_window_open = true;
             }
+            ui.label(
+                RichText::new("プロジェクタへ移動できる独立プレビュー")
+                    .size(11.0)
+                    .color(theme::MUTED),
+            );
         });
+    }
+
+    fn show_preview_window(&mut self, context: &Context) {
+        if !self.preview_window_open {
+            return;
+        }
+
+        let viewport_id = ViewportId::from_hash_of("vj-copilot-stage-preview");
+        let viewport_builder = ViewportBuilder::default()
+            .with_title("VJ Copilot - STAGE")
+            .with_inner_size([960.0, 540.0])
+            .with_min_inner_size([320.0, 180.0]);
+        let mut open = true;
+        context.show_viewport_immediate(viewport_id, viewport_builder, |viewport_context, _| {
+            if viewport_context.input(|input| input.viewport().close_requested()) {
+                open = false;
+                return;
+            }
+
+            egui::CentralPanel::default()
+                .frame(Frame::new().fill(theme::BACKGROUND))
+                .show(viewport_context, |ui| {
+                    self.show_stage(ui, Instant::now());
+                });
+            viewport_context.request_repaint_after(Duration::from_millis(16));
+        });
+        self.preview_window_open = open;
     }
 
     fn show_input_controls(&mut self, ui: &mut Ui) {
@@ -643,10 +790,6 @@ impl VjApp {
     }
 
     fn show_candidate_controls(&self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            theme::caption(ui, "02 / CLIP CANDIDATES");
-            theme::badge(ui, &format!("{} CLIPS", self.library.len()), theme::MUTED);
-        });
         ui.label(
             RichText::new(self.analysis_status())
                 .size(11.0)
@@ -682,6 +825,31 @@ impl VjApp {
 
         if let Some(slot) = clicked_slot {
             self.select_slot(slot);
+        }
+    }
+
+    fn show_media_tabs(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            let background_label = format!("BACKGROUND ({})", self.library.len());
+            let background =
+                ui.selectable_label(self.media_tab == MediaTab::Background, background_label);
+            if background.clicked() {
+                self.media_tab = MediaTab::Background;
+            }
+            let foreground_label = format!("FOREGROUND ({})", self.library.foregrounds().len());
+            let foreground =
+                ui.selectable_label(self.media_tab == MediaTab::Foreground, foreground_label);
+            if foreground.clicked() {
+                self.media_tab = MediaTab::Foreground;
+            }
+        });
+        ui.add_space(4.0);
+        match self.media_tab {
+            MediaTab::Background => {
+                self.show_candidate_controls(ui);
+                self.show_preview_grid(ui);
+            }
+            MediaTab::Foreground => self.show_foreground_controls(ui),
         }
     }
 
@@ -771,15 +939,12 @@ impl eframe::App for VjApp {
                         self.show_timing(ui);
                     });
                     ui.add_space(8.0);
-                    self.show_stage(ui, now);
+                    self.show_preview_window_button(ui);
                     ui.add_space(8.0);
-                    self.show_candidate_controls(ui);
-                    self.show_preview_grid(ui);
-                    ui.add_space(8.0);
-                    self.show_foreground_controls(ui);
+                    self.show_media_tabs(ui);
                     ui.add_space(4.0);
                     ui.label(
-                        RichText::new("1—4  選択     SPACE  選択解除")
+                        RichText::new("← →  タブ切替     1—4  選択     SPACE  選択解除")
                             .monospace()
                             .size(11.0)
                             .color(theme::MUTED),
@@ -798,6 +963,7 @@ impl eframe::App for VjApp {
                 });
             });
 
+        self.show_preview_window(context);
         context.request_repaint_after(Duration::from_millis(16));
     }
 }
