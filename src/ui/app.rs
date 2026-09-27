@@ -220,9 +220,8 @@ impl VjApp {
         });
         if let Some(direction) = tab_direction {
             self.media_tab = match (self.media_tab, direction) {
-                (MediaTab::Background, 1) | (MediaTab::Foreground, -1) => MediaTab::Foreground,
-                (MediaTab::Foreground, 1) | (MediaTab::Background, -1) => MediaTab::Background,
-                _ => self.media_tab,
+                (MediaTab::Background, _) => MediaTab::Foreground,
+                (MediaTab::Foreground, _) => MediaTab::Background,
             };
         }
         let space_pressed = context.input(|input| input.key_pressed(Key::Space));
