@@ -10,6 +10,7 @@ use eframe::egui::{
 };
 
 use crate::{
+    app_icon,
     domain::{
         service::{rank_clips, AnalysisTick, CandidateRefresh, CandidateState, PREVIEW_SLOT_COUNT},
         valueobject::{AnalysisReading, AudioLevels, ClipId, FeatureVector, TempoReading},
@@ -550,7 +551,8 @@ impl VjApp {
         let viewport_builder = ViewportBuilder::default()
             .with_title("VJ Copilot - STAGE")
             .with_inner_size([960.0, 540.0])
-            .with_min_inner_size([320.0, 180.0]);
+            .with_min_inner_size([320.0, 180.0])
+            .with_icon(std::sync::Arc::new(app_icon::app_icon()));
         let mut open = true;
         context.show_viewport_immediate(viewport_id, viewport_builder, |viewport_context, _| {
             if viewport_context.input(|input| input.viewport().close_requested()) {
