@@ -35,7 +35,7 @@ ffmpeg -version
 実際の PC 再生音または LINE / MIC 入力を使う場合は、次のコマンドで起動します。`--media-dir` を省略すると `demo-media` を使います。
 
 ```powershell
-cargo run --release --
+cargo run --release
 ```
 
 入力機器を使わずに画面と解析を確認する場合は `--demo` を付けます。合成音声の特徴が約 5 秒ごとに変わり、候補の更新を確認できます。
