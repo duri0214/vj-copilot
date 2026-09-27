@@ -29,6 +29,7 @@ use super::{level_meter::LevelMeter, theme};
 use crate::infra::audio_input::AudioBackend;
 
 const THUMBNAIL_SIZE: Vec2 = Vec2::new(112.0, 63.0);
+const STAGE_PREVIEW_WIDTH: f32 = 240.0;
 const SCROLL_CONTENT_RIGHT_MARGIN: f32 = 20.0;
 
 pub struct AppConfig {
@@ -246,9 +247,9 @@ impl VjApp {
     fn show_stage(&mut self, ui: &mut Ui, now: Instant) {
         ui.horizontal(|ui| {
             theme::caption(ui, "STAGE");
-            theme::badge(ui, "BACKGROUND + FOREGROUND", theme::MUTED);
+            theme::badge(ui, "PREVIEW ONLY", theme::MUTED);
         });
-        let width = ui.available_width().min(600.0);
+        let width = ui.available_width().min(STAGE_PREVIEW_WIDTH);
         let size = Vec2::new(width, width * 9.0 / 16.0);
         let (response, painter) = ui.allocate_painter(size, Sense::hover());
         painter.rect_filled(response.rect, 4.0, theme::BACKGROUND);
@@ -770,12 +771,12 @@ impl eframe::App for VjApp {
                         self.show_timing(ui);
                     });
                     ui.add_space(8.0);
+                    self.show_stage(ui, now);
+                    ui.add_space(8.0);
                     self.show_candidate_controls(ui);
                     self.show_preview_grid(ui);
                     ui.add_space(8.0);
                     self.show_foreground_controls(ui);
-                    ui.add_space(8.0);
-                    self.show_stage(ui, now);
                     ui.add_space(4.0);
                     ui.label(
                         RichText::new("1—4  選択     SPACE  選択解除")
