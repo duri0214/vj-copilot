@@ -8,7 +8,7 @@ pub struct LaunchOptions {
 }
 
 pub fn parse_args() -> LaunchOptions {
-    let mut media_dir = None;
+    let mut media_dir = Some(PathBuf::from("demo-media"));
     let mut demo = false;
     let mut notices = Vec::new();
     let mut show_help = false;
@@ -35,5 +35,5 @@ pub fn parse_args() -> LaunchOptions {
 }
 
 pub fn usage() -> &'static str {
-    "Usage: cargo run --release -- --media-dir <folder> [--demo]"
+    "Usage: cargo run --release -- [--media-dir <folder>] [--demo]"
 }
