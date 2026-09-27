@@ -396,9 +396,8 @@ impl VjApp {
         let phase = now.saturating_duration_since(self.started_at).as_secs_f32()
             * std::f32::consts::TAU
             / 3.0;
-        let horizontal_scale = phase.cos();
-        let transform =
-            |point: egui::Pos2| pos2(pivot.x + (point.x - pivot.x) * horizontal_scale, point.y);
+        let angle = phase;
+        let transform = |point: egui::Pos2| rotate_point_around(point, pivot, angle);
         let positions = [
             transform(image_rect.left_top()),
             transform(image_rect.right_top()),
@@ -913,6 +912,16 @@ impl VjApp {
             worker.stop();
         }
     }
+}
+
+fn rotate_point_around(point: egui::Pos2, pivot: egui::Pos2, angle: f32) -> egui::Pos2 {
+    let offset = point - pivot;
+    let (sin, cos) = angle.sin_cos();
+    pivot
+        + Vec2::new(
+            offset.x * cos - offset.y * sin,
+            offset.x * sin + offset.y * cos,
+        )
 }
 
 impl Drop for VjApp {
