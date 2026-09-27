@@ -209,6 +209,22 @@ impl VjApp {
         if context.wants_keyboard_input() {
             return;
         }
+        let tab_direction = context.input(|input| {
+            if input.key_pressed(Key::ArrowLeft) {
+                Some(-1_i8)
+            } else if input.key_pressed(Key::ArrowRight) {
+                Some(1_i8)
+            } else {
+                None
+            }
+        });
+        if let Some(direction) = tab_direction {
+            self.media_tab = match (self.media_tab, direction) {
+                (MediaTab::Background, 1) | (MediaTab::Foreground, -1) => MediaTab::Foreground,
+                (MediaTab::Foreground, 1) | (MediaTab::Background, -1) => MediaTab::Background,
+                _ => self.media_tab,
+            };
+        }
         let space_pressed = context.input(|input| input.key_pressed(Key::Space));
         if space_pressed {
             match self.media_tab {
@@ -815,14 +831,14 @@ impl VjApp {
 
     fn show_media_tabs(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            let background_label = format!("02 / BACKGROUND ({})", self.library.len());
+            let background_label = format!("BACKGROUND ({})", self.library.len());
             let background =
                 ui.selectable_label(self.media_tab == MediaTab::Background, background_label);
             if background.clicked() {
                 self.media_tab = MediaTab::Background;
             }
             let foreground_label =
-                format!("03 / FOREGROUND ({})", self.library.foregrounds().len());
+                format!("FOREGROUND ({})", self.library.foregrounds().len());
             let foreground =
                 ui.selectable_label(self.media_tab == MediaTab::Foreground, foreground_label);
             if foreground.clicked() {
@@ -930,7 +946,7 @@ impl eframe::App for VjApp {
                     self.show_media_tabs(ui);
                     ui.add_space(4.0);
                     ui.label(
-                        RichText::new("1—4  選択     SPACE  選択解除")
+                        RichText::new("← →  タブ切替     1—4  選択     SPACE  選択解除")
                             .monospace()
                             .size(11.0)
                             .color(theme::MUTED),
