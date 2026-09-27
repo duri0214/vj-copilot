@@ -2,7 +2,7 @@
 # will have compiled files and executables
 debug
 target
-demo-media/*.mp4
+demo-media/**/*.mp4
 
 # Local ASIO SDK and LLVM build assets. These are not committed or distributed.
 tools/asio-sdk/

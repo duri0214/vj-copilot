@@ -11,6 +11,9 @@ if ($null -eq $ffmpeg) {
 
 $resolvedOutputDir = [System.IO.Path]::GetFullPath($OutputDir)
 New-Item -ItemType Directory -Path $resolvedOutputDir -Force | Out-Null
+$backgroundDir = Join-Path $resolvedOutputDir "background"
+New-Item -ItemType Directory -Path $backgroundDir -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $resolvedOutputDir "foreground") -Force | Out-Null
 
 $clips = @(
     @{ file = "low_dark_01.mp4"; energy = 0.2; brightness = 0.2; box = "0x3050d0"; speed = 20 },
@@ -24,7 +27,7 @@ $clips = @(
 )
 
 foreach ($clip in $clips) {
-    $outputPath = Join-Path $resolvedOutputDir $clip.file
+    $outputPath = Join-Path $backgroundDir $clip.file
     $brightnessOffset = if ($clip.brightness -lt 0.5) { "-0.35" } else { "0.25" }
     $filter = "testsrc2=size=320x180:rate=15:duration=3,eq=brightness={0},drawbox=x='mod(t*{1}\,280)':y=70:w=40:h=40:color={2}:t=fill" -f $brightnessOffset, $clip.speed, $clip.box
 
@@ -43,6 +46,6 @@ $metadata = $clips | ForEach-Object {
 }
 $json = $metadata | ConvertTo-Json
 $utf8WithoutBom = [System.Text.UTF8Encoding]::new($false)
-[System.IO.File]::WriteAllText((Join-Path $resolvedOutputDir "clips.json"), $json, $utf8WithoutBom)
+[System.IO.File]::WriteAllText((Join-Path $backgroundDir "clips.json"), $json, $utf8WithoutBom)
 
-Write-Host "8 本のダミー MP4 と clips.json を生成しました: $resolvedOutputDir"
+Write-Host "8 本のダミー MP4 と clips.json を生成しました: $backgroundDir"

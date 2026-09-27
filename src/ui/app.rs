@@ -4,8 +4,8 @@ use std::{
 };
 
 use eframe::egui::{
-    self, Context, Frame, Image, Key, RichText, Sense, Stroke, TextureHandle, TextureOptions, Ui,
-    Vec2,
+    self, pos2, Context, Frame, Image, Key, Mesh, Rect, RichText, Sense, Shape, Stroke,
+    TextureHandle, TextureOptions, Ui, Vec2,
 };
 
 use crate::{
@@ -29,6 +29,7 @@ use super::{level_meter::LevelMeter, theme};
 use crate::infra::audio_input::AudioBackend;
 
 const THUMBNAIL_SIZE: Vec2 = Vec2::new(112.0, 63.0);
+const STAGE_PREVIEW_WIDTH: f32 = 240.0;
 const SCROLL_CONTENT_RIGHT_MARGIN: f32 = 20.0;
 
 pub struct AppConfig {
@@ -59,6 +60,9 @@ pub struct VjApp {
     candidate_refresh: CandidateRefresh,
     needs_candidate_refresh: bool,
     preview_slots: [PreviewSlot; PREVIEW_SLOT_COUNT],
+    selected_foreground: Option<String>,
+    stage_texture: Option<TextureHandle>,
+    foreground_texture: Option<(String, TextureHandle)>,
     started_at: Instant,
     last_animation_at: Instant,
 }
@@ -89,6 +93,9 @@ impl VjApp {
             candidate_refresh: CandidateRefresh::default(),
             needs_candidate_refresh: false,
             preview_slots: std::array::from_fn(|_| PreviewSlot::default()),
+            selected_foreground: None,
+            stage_texture: None,
+            foreground_texture: None,
             started_at: now,
             last_animation_at: now,
         }
@@ -235,6 +242,153 @@ impl VjApp {
                 .unwrap_or(0);
             preview_slot.advance(frame_count, frames_to_advance);
         }
+    }
+
+    fn show_stage(&mut self, ui: &mut Ui, now: Instant) {
+        ui.horizontal(|ui| {
+            theme::caption(ui, "STAGE");
+            theme::badge(ui, "PREVIEW ONLY", theme::MUTED);
+        });
+        let width = ui.available_width().min(STAGE_PREVIEW_WIDTH);
+        let size = Vec2::new(width, width * 9.0 / 16.0);
+        let (response, painter) = ui.allocate_painter(size, Sense::hover());
+        painter.rect_filled(response.rect, 4.0, theme::BACKGROUND);
+
+        let selected_frame = self.candidates.selected_slot().and_then(|slot| {
+            self.candidates
+                .slots()
+                .get(slot)
+                .and_then(Option::as_ref)
+                .and_then(|id| self.library.find(id))
+                .and_then(|clip| {
+                    clip.frames
+                        .get(self.preview_slots[slot].frame_index % clip.frames.len())
+                })
+        });
+        if let Some(frame) = selected_frame {
+            let image =
+                egui::ColorImage::from_rgba_unmultiplied([VIDEO_WIDTH, VIDEO_HEIGHT], &frame.rgba);
+            if let Some(texture) = self.stage_texture.as_mut() {
+                texture.set(image, TextureOptions::LINEAR);
+            } else {
+                self.stage_texture = Some(ui.ctx().load_texture(
+                    "stage-background",
+                    image,
+                    TextureOptions::LINEAR,
+                ));
+            }
+            if let Some(texture) = &self.stage_texture {
+                painter.image(
+                    texture.id(),
+                    response.rect,
+                    Rect::EVERYTHING,
+                    egui::Color32::WHITE,
+                );
+            }
+        } else {
+            painter.text(
+                response.rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Select a background clip",
+                egui::FontId::proportional(13.0),
+                theme::MUTED,
+            );
+        }
+
+        if let Some(opaque_center) = self.update_foreground_texture(ui.ctx()) {
+            self.paint_foreground(&painter, response.rect, opaque_center, now);
+        }
+        response.on_hover_text("STAGE preview");
+    }
+
+    fn update_foreground_texture(&mut self, context: &Context) -> Option<[f32; 2]> {
+        let name = self.selected_foreground.clone()?;
+        let foreground = self.library.foreground(&name)?;
+        let opaque_center = foreground.opaque_center;
+        let existing = self.foreground_texture.take();
+        self.foreground_texture = Some(match existing {
+            Some((existing_name, texture)) if existing_name == name => (existing_name, texture),
+            _ => {
+                let image =
+                    egui::ColorImage::from_rgba_unmultiplied([1920, 1080], &foreground.rgba);
+                (
+                    name,
+                    context.load_texture("stage-foreground", image, TextureOptions::LINEAR),
+                )
+            }
+        });
+        Some(opaque_center)
+    }
+
+    fn paint_foreground(
+        &self,
+        painter: &egui::Painter,
+        stage: Rect,
+        opaque_center: [f32; 2],
+        now: Instant,
+    ) {
+        let Some((_, texture)) = &self.foreground_texture else {
+            return;
+        };
+        let phase = now.saturating_duration_since(self.started_at).as_secs_f32()
+            * std::f32::consts::TAU
+            / 3.0;
+        let horizontal_scale = phase.cos();
+        let axis_x = stage.left() + stage.width() * opaque_center[0];
+        let x_at_canvas_left = axis_x - stage.width() * opaque_center[0] * horizontal_scale;
+        let x_at_canvas_right = x_at_canvas_left + stage.width() * horizontal_scale;
+        let (left, right, uv) = if x_at_canvas_left <= x_at_canvas_right {
+            (x_at_canvas_left, x_at_canvas_right, Rect::EVERYTHING)
+        } else {
+            (
+                x_at_canvas_right,
+                x_at_canvas_left,
+                Rect::from_min_max(pos2(1.0, 0.0), pos2(0.0, 1.0)),
+            )
+        };
+        let mut mesh = Mesh::with_texture(texture.id());
+        mesh.add_rect_with_uv(
+            Rect::from_min_max(pos2(left, stage.top()), pos2(right, stage.bottom())),
+            uv,
+            egui::Color32::WHITE,
+        );
+        painter.add(Shape::mesh(mesh));
+    }
+
+    fn show_foreground_controls(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            theme::caption(ui, "03 / FOREGROUND");
+            theme::badge(
+                ui,
+                &format!("{} PNG", self.library.foregrounds().len()),
+                theme::MUTED,
+            );
+            if ui.button("CLEAR").clicked() {
+                self.selected_foreground = None;
+            }
+        });
+        if self.library.foregrounds().is_empty() {
+            ui.label(
+                RichText::new("foreground/ に 1920x1080 RGBA PNG を追加してください")
+                    .size(11.0)
+                    .color(theme::MUTED),
+            );
+            return;
+        }
+        let names = self
+            .library
+            .foregrounds()
+            .iter()
+            .map(|foreground| foreground.name.clone())
+            .collect::<Vec<_>>();
+        ui.horizontal_wrapped(|ui| {
+            for name in names {
+                let selected = self.selected_foreground.as_deref() == Some(name.as_str());
+                if ui.selectable_label(selected, &name).clicked() {
+                    self.selected_foreground = Some(name);
+                }
+            }
+        });
     }
 
     fn show_input_controls(&mut self, ui: &mut Ui) {
@@ -617,8 +771,12 @@ impl eframe::App for VjApp {
                         self.show_timing(ui);
                     });
                     ui.add_space(8.0);
+                    self.show_stage(ui, now);
+                    ui.add_space(8.0);
                     self.show_candidate_controls(ui);
                     self.show_preview_grid(ui);
+                    ui.add_space(8.0);
+                    self.show_foreground_controls(ui);
                     ui.add_space(4.0);
                     ui.label(
                         RichText::new("1—4  選択     SPACE  選択解除")

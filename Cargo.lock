@@ -3485,6 +3485,7 @@ version = "0.1.0"
 dependencies = [
  "cpal",
  "eframe",
+ "image",
  "rustfft",
  "serde",
  "serde_json",

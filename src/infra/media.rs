@@ -16,6 +16,8 @@ pub const MAX_VIDEO_SECONDS: usize = 3;
 pub const MAX_VIDEO_FRAMES: usize = VIDEO_FRAMES_PER_SECOND * MAX_VIDEO_SECONDS;
 const MAX_CLIPS: usize = 8;
 const FRAME_BYTES: usize = VIDEO_WIDTH * VIDEO_HEIGHT * 4;
+pub const FOREGROUND_WIDTH: usize = 1920;
+pub const FOREGROUND_HEIGHT: usize = 1080;
 
 #[derive(Debug)]
 pub struct VideoFrame {
@@ -28,9 +30,17 @@ pub struct MediaClip {
     pub frames: Vec<VideoFrame>,
 }
 
+#[derive(Debug)]
+pub struct ForegroundImage {
+    pub name: String,
+    pub rgba: Vec<u8>,
+    pub opaque_center: [f32; 2],
+}
+
 #[derive(Debug, Default)]
 pub struct MediaLibrary {
     clips: Vec<MediaClip>,
+    foregrounds: Vec<ForegroundImage>,
 }
 
 impl MediaLibrary {
@@ -44,6 +54,16 @@ impl MediaLibrary {
 
     pub fn len(&self) -> usize {
         self.clips.len()
+    }
+
+    pub fn foregrounds(&self) -> &[ForegroundImage] {
+        &self.foregrounds
+    }
+
+    pub fn foreground(&self, name: &str) -> Option<&ForegroundImage> {
+        self.foregrounds
+            .iter()
+            .find(|foreground| foreground.name == name)
     }
 }
 
@@ -72,7 +92,7 @@ pub fn load_media_directory(media_dir: Option<&Path>) -> MediaLoadReport {
         return report;
     };
 
-    if !media_dir.is_dir() {
+    if let Err(_error) = fs::create_dir_all(media_dir) {
         report.notices.push(format!(
             "メディアフォルダが見つかりません: {}",
             media_dir.display()
@@ -80,7 +100,19 @@ pub fn load_media_directory(media_dir: Option<&Path>) -> MediaLoadReport {
         return report;
     }
 
-    let mp4_files = match collect_mp4_files(media_dir) {
+    let background_dir = media_dir.join("background");
+    let foreground_dir = media_dir.join("foreground");
+    for directory in [&background_dir, &foreground_dir] {
+        if let Err(error) = fs::create_dir_all(directory) {
+            report.notices.push(format!(
+                "Could not create media role directory: {} ({error})",
+                directory.display()
+            ));
+        }
+    }
+    load_foregrounds(&foreground_dir, &mut report);
+
+    let mp4_files = match collect_mp4_files(&background_dir) {
         Ok(files) => files,
         Err(error) => {
             report.notices.push(format!(
@@ -91,7 +123,7 @@ pub fn load_media_directory(media_dir: Option<&Path>) -> MediaLoadReport {
         }
     };
 
-    let manifest_path = media_dir.join("clips.json");
+    let manifest_path = background_dir.join("clips.json");
     let manifest_text = match fs::read_to_string(&manifest_path) {
         Ok(text) => text,
         Err(error) => {
@@ -211,6 +243,93 @@ pub fn load_media_directory(media_dir: Option<&Path>) -> MediaLoadReport {
     report
 }
 
+fn load_foregrounds(directory: &Path, report: &mut MediaLoadReport) {
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) => {
+            report.notices.push(format!(
+                "Could not read foreground directory: {} ({error})",
+                directory.display()
+            ));
+            return;
+        }
+    };
+
+    let mut paths = entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_file()))
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("png"))
+        })
+        .collect::<Vec<_>>();
+    paths.sort();
+
+    for path in paths {
+        match load_foreground(&path) {
+            Ok(foreground) => report.library.foregrounds.push(foreground),
+            Err(error) => report.notices.push(format!(
+                "Could not load foreground PNG: {} ({error})",
+                path.display()
+            )),
+        }
+    }
+}
+
+fn load_foreground(path: &Path) -> Result<ForegroundImage, String> {
+    let image = image::open(path)
+        .map_err(|error| error.to_string())?
+        .into_rgba8();
+    let (width, height) = image.dimensions();
+    if width != FOREGROUND_WIDTH as u32 || height != FOREGROUND_HEIGHT as u32 {
+        return Err(format!(
+            "expected {FOREGROUND_WIDTH}x{FOREGROUND_HEIGHT}, got {width}x{height}"
+        ));
+    }
+    let rgba = image.into_raw();
+    let opaque_center =
+        opaque_center(&rgba).ok_or_else(|| "contains no visible pixels".to_owned())?;
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "file name is not valid UTF-8".to_owned())?
+        .to_owned();
+
+    Ok(ForegroundImage {
+        name,
+        rgba,
+        opaque_center,
+    })
+}
+
+fn opaque_center(rgba: &[u8]) -> Option<[f32; 2]> {
+    let mut min_x = FOREGROUND_WIDTH;
+    let mut min_y = FOREGROUND_HEIGHT;
+    let mut max_x = 0;
+    let mut max_y = 0;
+    let mut found = false;
+
+    for (index, alpha) in rgba.iter().skip(3).step_by(4).enumerate() {
+        if *alpha == 0 {
+            continue;
+        }
+        let x = index % FOREGROUND_WIDTH;
+        let y = index / FOREGROUND_WIDTH;
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+        found = true;
+    }
+
+    found.then_some([
+        (min_x + max_x + 1) as f32 / 2.0 / FOREGROUND_WIDTH as f32,
+        (min_y + max_y + 1) as f32 / 2.0 / FOREGROUND_HEIGHT as f32,
+    ])
+}
+
 fn collect_mp4_files(media_dir: &Path) -> Result<BTreeMap<String, PathBuf>, std::io::Error> {
     let mut files = BTreeMap::new();
 
@@ -315,5 +434,56 @@ mod tests {
         assert!(is_direct_file_name("clip.mp4"));
         assert!(!is_direct_file_name("nested/clip.mp4"));
         assert!(!is_direct_file_name(""));
+    }
+
+    #[test]
+    fn finds_the_center_of_the_nontransparent_region() {
+        let mut rgba = vec![0; FOREGROUND_WIDTH * FOREGROUND_HEIGHT * 4];
+        for (x, y) in [(1_440, 810), (1_559, 899)] {
+            rgba[(y * FOREGROUND_WIDTH + x) * 4 + 3] = 255;
+        }
+
+        assert_eq!(opaque_center(&rgba), Some([0.78125, 0.791_666_7]));
+        assert_eq!(opaque_center(&vec![0; rgba.len()]), None);
+    }
+
+    #[test]
+    fn creates_background_and_foreground_directories() {
+        let directory = std::env::temp_dir().join(format!(
+            "vj-copilot-media-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        let report = load_media_directory(Some(&directory));
+
+        assert!(directory.join("background").is_dir());
+        assert!(directory.join("foreground").is_dir());
+        assert_eq!(report.library.len(), 0);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn loads_a_full_hd_transparent_png() {
+        let directory = std::env::temp_dir().join(format!(
+            "vj-copilot-foreground-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("right.png");
+        let mut image = image::RgbaImage::new(FOREGROUND_WIDTH as u32, FOREGROUND_HEIGHT as u32);
+        image.put_pixel(1_800, 900, image::Rgba([255, 255, 255, 255]));
+        image.save(&path).unwrap();
+
+        let foreground = load_foreground(&path).unwrap();
+
+        assert_eq!(foreground.name, "right.png");
+        assert_eq!(foreground.opaque_center, [0.937_760_4, 0.833_796_3]);
+        fs::remove_dir_all(directory).unwrap();
     }
 }
