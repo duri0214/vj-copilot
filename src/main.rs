@@ -1,4 +1,3 @@
-mod app_icon;
 mod domain;
 mod infra;
 mod launch;
@@ -32,8 +31,7 @@ fn main() {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([640.0, 800.0])
-            .with_min_inner_size([540.0, 540.0])
-            .with_icon(std::sync::Arc::new(app_icon::app_icon())),
+            .with_min_inner_size([540.0, 540.0]),
         ..Default::default()
     };
 
