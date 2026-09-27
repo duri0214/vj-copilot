@@ -837,8 +837,7 @@ impl VjApp {
             if background.clicked() {
                 self.media_tab = MediaTab::Background;
             }
-            let foreground_label =
-                format!("FOREGROUND ({})", self.library.foregrounds().len());
+            let foreground_label = format!("FOREGROUND ({})", self.library.foregrounds().len());
             let foreground =
                 ui.selectable_label(self.media_tab == MediaTab::Foreground, foreground_label);
             if foreground.clicked() {
