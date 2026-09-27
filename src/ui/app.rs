@@ -32,6 +32,12 @@ const THUMBNAIL_SIZE: Vec2 = Vec2::new(112.0, 63.0);
 const STAGE_PREVIEW_WIDTH: f32 = 960.0;
 const SCROLL_CONTENT_RIGHT_MARGIN: f32 = 20.0;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MediaTab {
+    Background,
+    Foreground,
+}
+
 pub struct AppConfig {
     pub media_dir: Option<PathBuf>,
     pub demo: bool,
@@ -61,6 +67,7 @@ pub struct VjApp {
     needs_candidate_refresh: bool,
     preview_slots: [PreviewSlot; PREVIEW_SLOT_COUNT],
     selected_foreground: Option<String>,
+    media_tab: MediaTab,
     preview_window_open: bool,
     stage_texture: Option<TextureHandle>,
     foreground_texture: Option<(String, TextureHandle)>,
@@ -95,6 +102,7 @@ impl VjApp {
             needs_candidate_refresh: false,
             preview_slots: std::array::from_fn(|_| PreviewSlot::default()),
             selected_foreground: None,
+            media_tab: MediaTab::Background,
             preview_window_open: true,
             stage_texture: None,
             foreground_texture: None,
@@ -198,8 +206,13 @@ impl VjApp {
         if context.wants_keyboard_input() {
             return;
         }
-        if self.candidates.is_held() && context.input(|input| input.key_pressed(Key::Space)) {
-            self.resume_auto_mode();
+        let space_pressed = context.input(|input| input.key_pressed(Key::Space));
+        if space_pressed {
+            match self.media_tab {
+                MediaTab::Background if self.candidates.is_held() => self.resume_auto_mode(),
+                MediaTab::Foreground => self.selected_foreground = None,
+                _ => {}
+            }
         }
 
         let selected_slot = context.input(|input| {
@@ -208,8 +221,19 @@ impl VjApp {
                 .position(|key| input.key_pressed(*key))
         });
         if let Some(slot) = selected_slot {
-            self.select_slot(slot);
+            match self.media_tab {
+                MediaTab::Background => self.select_slot(slot),
+                MediaTab::Foreground => self.select_foreground_slot(slot),
+            }
         }
+    }
+
+    fn select_foreground_slot(&mut self, slot: usize) {
+        self.selected_foreground = self
+            .library
+            .foregrounds()
+            .get(slot)
+            .map(|foreground| foreground.name.clone());
     }
 
     fn select_slot(&mut self, slot: usize) {
@@ -347,14 +371,7 @@ impl VjApp {
     }
 
     fn show_foreground_controls(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            theme::caption(ui, "03 / FOREGROUND");
-            theme::badge(
-                ui,
-                &format!("{} PNG", self.library.foregrounds().len()),
-                theme::MUTED,
-            );
-        });
+        ui.label(RichText::new("候補を選択").size(11.0).color(theme::MUTED));
         if self.library.foregrounds().is_empty() {
             ui.label(
                 RichText::new("foreground/ に 1920x1080 RGBA PNG を追加してください")
@@ -370,9 +387,10 @@ impl VjApp {
             .map(|foreground| foreground.name.clone())
             .collect::<Vec<_>>();
         ui.horizontal_wrapped(|ui| {
-            for name in names {
+            for (index, name) in names.into_iter().enumerate() {
                 let selected = self.selected_foreground.as_deref() == Some(name.as_str());
-                if ui.selectable_label(selected, &name).clicked() {
+                let label = format!("{}  {}", index + 1, name);
+                if ui.selectable_label(selected, label).clicked() {
                     self.selected_foreground = if selected { None } else { Some(name) };
                 }
             }
@@ -675,7 +693,7 @@ impl VjApp {
 
     fn show_candidate_controls(&self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            theme::caption(ui, "02 / CLIP CANDIDATES");
+            theme::caption(ui, "02 / BACKGROUND");
             theme::badge(ui, &format!("{} CLIPS", self.library.len()), theme::MUTED);
         });
         ui.label(
@@ -713,6 +731,29 @@ impl VjApp {
 
         if let Some(slot) = clicked_slot {
             self.select_slot(slot);
+        }
+    }
+
+    fn show_media_tabs(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            let background =
+                ui.selectable_label(self.media_tab == MediaTab::Background, "02 / BACKGROUND");
+            if background.clicked() {
+                self.media_tab = MediaTab::Background;
+            }
+            let foreground =
+                ui.selectable_label(self.media_tab == MediaTab::Foreground, "03 / FOREGROUND");
+            if foreground.clicked() {
+                self.media_tab = MediaTab::Foreground;
+            }
+        });
+        ui.add_space(4.0);
+        match self.media_tab {
+            MediaTab::Background => {
+                self.show_candidate_controls(ui);
+                self.show_preview_grid(ui);
+            }
+            MediaTab::Foreground => self.show_foreground_controls(ui),
         }
     }
 
@@ -804,10 +845,7 @@ impl eframe::App for VjApp {
                     ui.add_space(8.0);
                     self.show_preview_window_button(ui);
                     ui.add_space(8.0);
-                    self.show_candidate_controls(ui);
-                    self.show_preview_grid(ui);
-                    ui.add_space(8.0);
-                    self.show_foreground_controls(ui);
+                    self.show_media_tabs(ui);
                     ui.add_space(4.0);
                     ui.label(
                         RichText::new("1—4  選択     SPACE  選択解除")
