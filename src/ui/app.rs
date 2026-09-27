@@ -232,11 +232,16 @@ impl VjApp {
     }
 
     fn select_foreground_slot(&mut self, slot: usize) {
-        self.selected_foreground = self
+        let selected = self
             .library
             .foregrounds()
             .get(slot)
             .map(|foreground| foreground.name.clone());
+        self.selected_foreground = if selected == self.selected_foreground {
+            None
+        } else {
+            selected
+        };
     }
 
     fn select_slot(&mut self, slot: usize) {
@@ -468,7 +473,7 @@ impl VjApp {
                         Sense::click(),
                     );
                     if response.clicked() {
-                        self.selected_foreground = if selected { None } else { Some(name.clone()) };
+                        self.selected_foreground = Some(name.clone());
                     }
                 }
             });
