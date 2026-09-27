@@ -5,7 +5,7 @@ use std::{
 
 use eframe::egui::{
     self, pos2, Context, Frame, Image, Key, Mesh, Rect, RichText, Sense, Shape, Stroke,
-    TextureHandle, TextureOptions, Ui, Vec2,
+    TextureHandle, TextureOptions, Ui, Vec2, ViewportBuilder, ViewportId,
 };
 
 use crate::{
@@ -29,7 +29,7 @@ use super::{level_meter::LevelMeter, theme};
 use crate::infra::audio_input::AudioBackend;
 
 const THUMBNAIL_SIZE: Vec2 = Vec2::new(112.0, 63.0);
-const STAGE_PREVIEW_WIDTH: f32 = 240.0;
+const STAGE_PREVIEW_WIDTH: f32 = 960.0;
 const SCROLL_CONTENT_RIGHT_MARGIN: f32 = 20.0;
 
 pub struct AppConfig {
@@ -61,6 +61,7 @@ pub struct VjApp {
     needs_candidate_refresh: bool,
     preview_slots: [PreviewSlot; PREVIEW_SLOT_COUNT],
     selected_foreground: Option<String>,
+    preview_window_open: bool,
     stage_texture: Option<TextureHandle>,
     foreground_texture: Option<(String, TextureHandle)>,
     started_at: Instant,
@@ -94,6 +95,7 @@ impl VjApp {
             needs_candidate_refresh: false,
             preview_slots: std::array::from_fn(|_| PreviewSlot::default()),
             selected_foreground: None,
+            preview_window_open: true,
             stage_texture: None,
             foreground_texture: None,
             started_at: now,
@@ -247,7 +249,7 @@ impl VjApp {
     fn show_stage(&mut self, ui: &mut Ui, now: Instant) {
         ui.horizontal(|ui| {
             theme::caption(ui, "STAGE");
-            theme::badge(ui, "PREVIEW ONLY", theme::MUTED);
+            theme::badge(ui, "SEPARATE WINDOW", theme::MUTED);
         });
         let width = ui.available_width().min(STAGE_PREVIEW_WIDTH);
         let size = Vec2::new(width, width * 9.0 / 16.0);
@@ -389,6 +391,49 @@ impl VjApp {
                 }
             }
         });
+    }
+
+    fn show_preview_window_button(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            theme::caption(ui, "STAGE OUTPUT");
+            if self.preview_window_open {
+                theme::badge(ui, "OPEN", theme::ACCENT);
+            } else if ui.button("OPEN STAGE WINDOW").clicked() {
+                self.preview_window_open = true;
+            }
+            ui.label(
+                RichText::new("プロジェクタへ移動できる独立プレビュー")
+                    .size(11.0)
+                    .color(theme::MUTED),
+            );
+        });
+    }
+
+    fn show_preview_window(&mut self, context: &Context) {
+        if !self.preview_window_open {
+            return;
+        }
+
+        let viewport_id = ViewportId::from_hash_of("vj-copilot-stage-preview");
+        let viewport_builder = ViewportBuilder::default()
+            .with_title("VJ Copilot - STAGE")
+            .with_inner_size([960.0, 540.0])
+            .with_min_inner_size([320.0, 180.0]);
+        let mut open = true;
+        context.show_viewport_immediate(viewport_id, viewport_builder, |viewport_context, _| {
+            if viewport_context.input(|input| input.viewport().close_requested()) {
+                open = false;
+                return;
+            }
+
+            egui::CentralPanel::default()
+                .frame(Frame::new().fill(theme::BACKGROUND))
+                .show(viewport_context, |ui| {
+                    self.show_stage(ui, Instant::now());
+                });
+            viewport_context.request_repaint_after(Duration::from_millis(16));
+        });
+        self.preview_window_open = open;
     }
 
     fn show_input_controls(&mut self, ui: &mut Ui) {
@@ -771,7 +816,7 @@ impl eframe::App for VjApp {
                         self.show_timing(ui);
                     });
                     ui.add_space(8.0);
-                    self.show_stage(ui, now);
+                    self.show_preview_window_button(ui);
                     ui.add_space(8.0);
                     self.show_candidate_controls(ui);
                     self.show_preview_grid(ui);
@@ -798,6 +843,7 @@ impl eframe::App for VjApp {
                 });
             });
 
+        self.show_preview_window(context);
         context.request_repaint_after(Duration::from_millis(16));
     }
 }
