@@ -247,10 +247,6 @@ impl VjApp {
     }
 
     fn show_stage(&mut self, ui: &mut Ui, now: Instant) {
-        ui.horizontal(|ui| {
-            theme::caption(ui, "STAGE");
-            theme::badge(ui, "SEPARATE WINDOW", theme::MUTED);
-        });
         let width = ui.available_width().min(STAGE_PREVIEW_WIDTH);
         let size = Vec2::new(width, width * 9.0 / 16.0);
         let (response, painter) = ui.allocate_painter(size, Sense::hover());
