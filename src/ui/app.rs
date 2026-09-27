@@ -18,8 +18,8 @@ use crate::{
         analysis_worker::{AnalysisUpdate, AnalysisWorker, INPUT_IDLE_TIMEOUT},
         audio_input::{AudioInput, AudioSource, InputStatus},
         media::{
-            MediaClip, MediaLibrary, MediaLoadReport, VIDEO_FRAMES_PER_SECOND, VIDEO_HEIGHT,
-            VIDEO_WIDTH,
+            MediaClip, MediaLibrary, MediaLoadReport, FOREGROUND_HEIGHT, FOREGROUND_WIDTH,
+            VIDEO_FRAMES_PER_SECOND, VIDEO_HEIGHT, VIDEO_WIDTH,
         },
     },
 };
@@ -409,7 +409,7 @@ impl VjApp {
                                 .foreground(name)
                                 .expect("foreground name from library");
                             let image = egui::ColorImage::from_rgba_unmultiplied(
-                                [VIDEO_WIDTH, VIDEO_HEIGHT],
+                                [FOREGROUND_WIDTH, FOREGROUND_HEIGHT],
                                 &foreground.rgba,
                             );
                             ui.ctx().load_texture(
