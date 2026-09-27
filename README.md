@@ -97,7 +97,7 @@ Background は `background` 直下へ MP4 と `background-metadata.json` を置�
 
 ### Foreground
 
-Foreground は `foreground` 直下へ、1920×1080 の RGBA PNG を置きます。透明キャンバス上での配置が、そのまま STAGE 上の配置になります。子フォルダ内の PNG、サイズが異なる PNG、読み込めない PNG は候補から除外されます。
+Foreground は `foreground` 直下へ透過 PNG を置きます。画像サイズは任意で、透明でない部分の中心を軸に表示・反転します。STAGE 上で Foreground をドラッグすると位置を調整できます。子フォルダ内の PNG、完全に透明な PNG、読み込めない PNG は候補から除外されます。
 
 STAGE には Foreground を 1 枚だけ表示できます。別の画像を選ぶと置き換わり、`CLEAR` で Background だけの表示へ戻ります。
 
@@ -119,7 +119,7 @@ PC で再生中の音を使う場合は、音楽を出している Windows の�
 
 - 素材が表示されない: `--media-dir`、フォルダ構成、ファイル名、`background-metadata.json` の JSON と値を確認します。
 - MP4 が除外される: FFmpeg で MP4 を開けることと、メタデータの `file` が実際のファイル名と一致することを確認します。
-- Foreground が除外される: PNG が `foreground` 直下にあり、1920×1080 の RGBA 画像であることを確認します。
+- Foreground が除外される: PNG が `foreground` 直下にあり、透明でない画素を含むことを確認します。
 - 音量メーターが動かない: 入力を開始したこと、選択したデバイスで音が流れていること、Windows 側でデバイスが利用可能なことを確認します。
 - `ffmpeg` を起動できない: 新しい PowerShell で `ffmpeg -version` が成功するよう PATH を設定します。
 - 候補が `Nothing` のまま: 有効な MP4 が 1 本以上読み込まれていることと、音声入力が届いていることを確認します。4 本未満の場合、不足する枠は `Nothing` になります。

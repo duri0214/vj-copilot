@@ -10,6 +10,7 @@ use eframe::egui::{
 };
 
 use crate::{
+    app_icon,
     domain::{
         service::{rank_clips, AnalysisTick, CandidateRefresh, CandidateState, PREVIEW_SLOT_COUNT},
         valueobject::{AnalysisReading, AudioLevels, ClipId, FeatureVector, TempoReading},
@@ -18,8 +19,8 @@ use crate::{
         analysis_worker::{AnalysisUpdate, AnalysisWorker, INPUT_IDLE_TIMEOUT},
         audio_input::{AudioInput, AudioSource, InputStatus},
         media::{
-            MediaClip, MediaLibrary, MediaLoadReport, FOREGROUND_HEIGHT, FOREGROUND_WIDTH,
-            VIDEO_FRAMES_PER_SECOND, VIDEO_HEIGHT, VIDEO_WIDTH,
+            MediaClip, MediaLibrary, MediaLoadReport, VIDEO_FRAMES_PER_SECOND, VIDEO_HEIGHT,
+            VIDEO_WIDTH,
         },
     },
 };
@@ -73,6 +74,7 @@ pub struct VjApp {
     stage_texture: Option<TextureHandle>,
     foreground_texture: Option<(String, TextureHandle)>,
     foreground_preview_textures: HashMap<String, TextureHandle>,
+    foreground_offset: Vec2,
     started_at: Instant,
     last_animation_at: Instant,
 }
@@ -109,6 +111,7 @@ impl VjApp {
             stage_texture: None,
             foreground_texture: None,
             foreground_preview_textures: HashMap::new(),
+            foreground_offset: Vec2::ZERO,
             started_at: now,
             last_animation_at: now,
         }
@@ -296,7 +299,7 @@ impl VjApp {
     fn show_stage(&mut self, ui: &mut Ui, now: Instant) {
         let width = ui.available_width().min(STAGE_PREVIEW_WIDTH);
         let size = Vec2::new(width, width * 9.0 / 16.0);
-        let (response, painter) = ui.allocate_painter(size, Sense::hover());
+        let (response, painter) = ui.allocate_painter(size, Sense::drag());
         painter.rect_filled(response.rect, 4.0, theme::BACKGROUND);
 
         let selected_frame = self.candidates.selected_slot().and_then(|slot| {
@@ -333,9 +336,12 @@ impl VjApp {
         }
 
         if self.update_foreground_texture(ui.ctx()) {
+            if response.dragged() {
+                self.foreground_offset += response.drag_delta();
+            }
             self.paint_foreground(&painter, response.rect, now);
         }
-        response.on_hover_text("STAGE preview");
+        response.on_hover_text("STAGE preview / Foreground はドラッグで移動");
     }
 
     fn update_foreground_texture(&mut self, context: &Context) -> bool {
@@ -346,50 +352,75 @@ impl VjApp {
             return false;
         };
         let existing = self.foreground_texture.take();
+        let texture_changed =
+            !matches!(&existing, Some((existing_name, _)) if existing_name == &name);
         self.foreground_texture = Some(match existing {
             Some((existing_name, texture)) if existing_name == name => (existing_name, texture),
             _ => {
-                let image =
-                    egui::ColorImage::from_rgba_unmultiplied([1920, 1080], &foreground.rgba);
+                let image = egui::ColorImage::from_rgba_unmultiplied(
+                    [foreground.width, foreground.height],
+                    &foreground.rgba,
+                );
                 (
                     name,
                     context.load_texture("stage-foreground", image, TextureOptions::LINEAR),
                 )
             }
         });
+        if texture_changed {
+            self.foreground_offset = Vec2::ZERO;
+        }
         true
     }
 
     fn paint_foreground(&self, painter: &egui::Painter, stage: Rect, now: Instant) {
-        let Some((_, texture)) = &self.foreground_texture else {
+        let Some((name, texture)) = &self.foreground_texture else {
             return;
         };
+        let Some(foreground) = self.library.foreground(name) else {
+            return;
+        };
+        let scale = (stage.width() / foreground.width as f32)
+            .min(stage.height() / foreground.height as f32)
+            .min(1.0);
+        let image_size = Vec2::new(
+            foreground.width as f32 * scale,
+            foreground.height as f32 * scale,
+        );
+        let image_rect =
+            Rect::from_center_size(stage.center() + self.foreground_offset, image_size);
+        let pivot = image_rect.min
+            + Vec2::new(
+                foreground.opaque_center.0 * scale,
+                foreground.opaque_center.1 * scale,
+            );
         let phase = now.saturating_duration_since(self.started_at).as_secs_f32()
             * std::f32::consts::TAU
             / 3.0;
         let horizontal_scale = phase.cos();
-        let axis_x = stage.center().x;
-        let x_at_canvas_left = axis_x - stage.width() * 0.5 * horizontal_scale;
-        let x_at_canvas_right = x_at_canvas_left + stage.width() * horizontal_scale;
-        let (left, right, uv) = if x_at_canvas_left <= x_at_canvas_right {
-            (
-                x_at_canvas_left,
-                x_at_canvas_right,
-                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-            )
-        } else {
-            (
-                x_at_canvas_right,
-                x_at_canvas_left,
-                Rect::from_min_max(pos2(1.0, 0.0), pos2(0.0, 1.0)),
-            )
-        };
+        let transform =
+            |point: egui::Pos2| pos2(pivot.x + (point.x - pivot.x) * horizontal_scale, point.y);
+        let positions = [
+            transform(image_rect.left_top()),
+            transform(image_rect.right_top()),
+            transform(image_rect.right_bottom()),
+            transform(image_rect.left_bottom()),
+        ];
+        let uvs = [
+            pos2(0.0, 0.0),
+            pos2(1.0, 0.0),
+            pos2(1.0, 1.0),
+            pos2(0.0, 1.0),
+        ];
         let mut mesh = Mesh::with_texture(texture.id());
-        mesh.add_rect_with_uv(
-            Rect::from_min_max(pos2(left, stage.top()), pos2(right, stage.bottom())),
-            uv,
-            egui::Color32::WHITE,
-        );
+        for (position, uv) in positions.into_iter().zip(uvs) {
+            mesh.vertices.push(egui::epaint::Vertex {
+                pos: position,
+                uv,
+                color: egui::Color32::WHITE,
+            });
+        }
+        mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
         painter.add(Shape::mesh(mesh));
     }
 
@@ -397,7 +428,7 @@ impl VjApp {
         ui.label(RichText::new("候補を選択").size(11.0).color(theme::MUTED));
         if self.library.foregrounds().is_empty() {
             ui.label(
-                RichText::new("foreground/ に 1920x1080 RGBA PNG を追加してください")
+                RichText::new("foreground/ に透過 PNG を追加してください")
                     .size(11.0)
                     .color(theme::MUTED),
             );
@@ -429,7 +460,7 @@ impl VjApp {
                                 .foreground(name)
                                 .expect("foreground name from library");
                             let image = egui::ColorImage::from_rgba_unmultiplied(
-                                [FOREGROUND_WIDTH, FOREGROUND_HEIGHT],
+                                [foreground.width, foreground.height],
                                 &foreground.rgba,
                             );
                             ui.ctx().load_texture(
@@ -520,7 +551,8 @@ impl VjApp {
         let viewport_builder = ViewportBuilder::default()
             .with_title("VJ Copilot - STAGE")
             .with_inner_size([960.0, 540.0])
-            .with_min_inner_size([320.0, 180.0]);
+            .with_min_inner_size([320.0, 180.0])
+            .with_icon(std::sync::Arc::new(app_icon::app_icon()));
         let mut open = true;
         context.show_viewport_immediate(viewport_id, viewport_builder, |viewport_context, _| {
             if viewport_context.input(|input| input.viewport().close_requested()) {

@@ -15,8 +15,6 @@ pub const VIDEO_FRAMES_PER_SECOND: usize = 15;
 pub const MAX_VIDEO_SECONDS: usize = 3;
 pub const MAX_VIDEO_FRAMES: usize = VIDEO_FRAMES_PER_SECOND * MAX_VIDEO_SECONDS;
 const FRAME_BYTES: usize = VIDEO_WIDTH * VIDEO_HEIGHT * 4;
-pub const FOREGROUND_WIDTH: usize = 1920;
-pub const FOREGROUND_HEIGHT: usize = 1080;
 
 #[derive(Debug)]
 pub struct VideoFrame {
@@ -32,7 +30,10 @@ pub struct MediaClip {
 #[derive(Debug)]
 pub struct ForegroundImage {
     pub name: String,
+    pub width: usize,
+    pub height: usize,
     pub rgba: Vec<u8>,
+    pub opaque_center: (f32, f32),
 }
 
 #[derive(Debug, Default)]
@@ -274,19 +275,40 @@ fn load_foreground(path: &Path) -> Result<ForegroundImage, String> {
         .map_err(|error| error.to_string())?
         .into_rgba8();
     let (width, height) = image.dimensions();
-    if width != FOREGROUND_WIDTH as u32 || height != FOREGROUND_HEIGHT as u32 {
-        return Err(format!(
-            "expected {FOREGROUND_WIDTH}x{FOREGROUND_HEIGHT}, got {width}x{height}"
-        ));
-    }
     let rgba = image.into_raw();
+    let mut alpha_sum = 0_u64;
+    let mut alpha_weighted_x = 0_u64;
+    let mut alpha_weighted_y = 0_u64;
+    for (index, pixel) in rgba.as_chunks::<4>().0.iter().enumerate() {
+        let alpha = u64::from(pixel[3]);
+        if alpha == 0 {
+            continue;
+        }
+        let x = (index as u64) % u64::from(width);
+        let y = (index as u64) / u64::from(width);
+        alpha_sum += alpha;
+        alpha_weighted_x += x * alpha;
+        alpha_weighted_y += y * alpha;
+    }
+    if alpha_sum == 0 {
+        return Err("image has no opaque pixels".to_owned());
+    }
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| "file name is not valid UTF-8".to_owned())?
         .to_owned();
 
-    Ok(ForegroundImage { name, rgba })
+    Ok(ForegroundImage {
+        name,
+        width: width as usize,
+        height: height as usize,
+        rgba,
+        opaque_center: (
+            alpha_weighted_x as f32 / alpha_sum as f32,
+            alpha_weighted_y as f32 / alpha_sum as f32,
+        ),
+    })
 }
 
 fn collect_mp4_files(media_dir: &Path) -> Result<BTreeMap<String, PathBuf>, std::io::Error> {
@@ -418,7 +440,7 @@ mod tests {
     }
 
     #[test]
-    fn loads_a_full_hd_transparent_png() {
+    fn loads_a_transparent_png_and_finds_opaque_center() {
         let directory = std::env::temp_dir().join(format!(
             "vj-copilot-foreground-test-{}",
             std::time::SystemTime::now()
@@ -428,13 +450,36 @@ mod tests {
         ));
         fs::create_dir_all(&directory).unwrap();
         let path = directory.join("right.png");
-        let mut image = image::RgbaImage::new(FOREGROUND_WIDTH as u32, FOREGROUND_HEIGHT as u32);
-        image.put_pixel(1_800, 900, image::Rgba([255, 255, 255, 255]));
+        let mut image = image::RgbaImage::new(400, 300);
+        image.put_pixel(300, 200, image::Rgba([255, 255, 255, 255]));
+        image.put_pixel(200, 100, image::Rgba([255, 255, 255, 128]));
         image.save(&path).unwrap();
 
         let foreground = load_foreground(&path).unwrap();
 
         assert_eq!(foreground.name, "right.png");
+        assert_eq!((foreground.width, foreground.height), (400, 300));
+        assert!((foreground.opaque_center.0 - 266.57938).abs() < 0.001);
+        assert!((foreground.opaque_center.1 - 166.57938).abs() < 0.001);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn rejects_a_fully_transparent_png() {
+        let directory = std::env::temp_dir().join(format!(
+            "vj-copilot-transparent-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("empty.png");
+        image::RgbaImage::new(16, 16).save(&path).unwrap();
+
+        let error = load_foreground(&path).unwrap_err();
+
+        assert_eq!(error, "image has no opaque pixels");
         fs::remove_dir_all(directory).unwrap();
     }
 }
