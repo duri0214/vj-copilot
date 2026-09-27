@@ -354,9 +354,6 @@ impl VjApp {
                 &format!("{} PNG", self.library.foregrounds().len()),
                 theme::MUTED,
             );
-            if ui.button("CLEAR").clicked() {
-                self.selected_foreground = None;
-            }
         });
         if self.library.foregrounds().is_empty() {
             ui.label(
@@ -376,7 +373,7 @@ impl VjApp {
             for name in names {
                 let selected = self.selected_foreground.as_deref() == Some(name.as_str());
                 if ui.selectable_label(selected, &name).clicked() {
-                    self.selected_foreground = Some(name);
+                    self.selected_foreground = if selected { None } else { Some(name) };
                 }
             }
         });
