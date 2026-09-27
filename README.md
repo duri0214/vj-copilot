@@ -32,16 +32,16 @@ ffmpeg -version
 
 ## 3. 起動する
 
-実際の PC 再生音または LINE / MIC 入力を使う場合は、次のコマンドで起動します。
+実際の PC 再生音または LINE / MIC 入力を使う場合は、次のコマンドで起動します。`--media-dir` を省略すると `demo-media` を使います。
 
 ```powershell
-cargo run --release -- --media-dir .\demo-media
+cargo run --release --
 ```
 
 入力機器を使わずに画面と解析を確認する場合は `--demo` を付けます。合成音声の特徴が約 5 秒ごとに変わり、候補の更新を確認できます。
 
 ```powershell
-cargo run --release -- --media-dir .\demo-media --demo
+cargo run --release -- --demo
 ```
 
 リリース exe だけを作る場合は、次を実行します。
@@ -53,15 +53,15 @@ cargo build --release
 作成された exe は、リポジトリ直下から直接起動できます。
 
 ```powershell
-.\target\release\vj-copilot.exe --media-dir .\demo-media
-.\target\release\vj-copilot.exe --media-dir .\demo-media --demo
+.\target\release\vj-copilot.exe
+.\target\release\vj-copilot.exe --demo
 ```
 
-別の素材フォルダを使う場合は、`.\demo-media` をそのフォルダのパスへ置き換えてください。
+別の素材フォルダを使う場合だけ、`--media-dir` でパスを指定します。
 
 ## 4. 素材を配置する
 
-`--media-dir` で指定するフォルダは、次の構成にします。フォルダがない場合は起動時に作成されます。
+`--media-dir` で指定するフォルダ（省略時は `demo-media`）は、次の構成にします。フォルダがない場合は起動時に作成されます。
 
 ```text
 media-dir/
