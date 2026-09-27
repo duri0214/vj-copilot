@@ -20,15 +20,15 @@ ffmpeg -version
 
 リポジトリを取得したら、PowerShell でリポジトリ直下へ移動します。以降のコマンドはすべてリポジトリ直下で実行します。
 
-## 2. ダミー素材を生成する
+## 2. Background 素材を生成する
 
-次のスクリプトは `demo-media\background` に 8 本の MP4 と `background-metadata.json` を生成します。
+次のスクリプトは、指定した出力先（省略時は `demo-media`）の `background` に 8 本のサンプル MP4 と `background-metadata.json` を生成します。`demo-media` はサンプル素材を置くフォルダ名の一例です。
 
 ```powershell
-.\scripts\generate-demo-media.ps1
+.\scripts\generate-background-media.ps1
 ```
 
-同梱の `demo-media\foreground\neon-prism-right.png` と合わせて、Background と Foreground の表示をすぐに試せます。生成した MP4 は Git 管理外です。
+同梱の `demo-media\foreground\neon-prism-right.png` と合わせて、Background と Foreground の表示をすぐに試せます。生成した MP4 は Git 管理外です。別のフォルダへ生成する場合は `-OutputDir` を指定します。
 
 ## 3. 起動する
 

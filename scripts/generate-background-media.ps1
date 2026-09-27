@@ -48,4 +48,4 @@ $json = $metadata | ConvertTo-Json
 $utf8WithoutBom = [System.Text.UTF8Encoding]::new($false)
 [System.IO.File]::WriteAllText((Join-Path $backgroundDir "background-metadata.json"), $json, $utf8WithoutBom)
 
-Write-Host "8 本のダミー MP4 と background-metadata.json を生成しました: $backgroundDir"
+Write-Host "8 本のサンプル MP4 と background-metadata.json を生成しました: $backgroundDir"
