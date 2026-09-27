@@ -38,10 +38,17 @@ ffmpeg -version
 cargo run --release
 ```
 
+素材フォルダを明示する場合は、`--media-dir` にパスを指定します。次の例は既定値と同じ `demo-media` を明示しています。
+
+```powershell
+cargo run --release -- --media-dir .\demo-media
+```
+
 入力機器を使わずに画面と解析を確認する場合は `--demo` を付けます。合成音声の特徴が約 5 秒ごとに変わり、候補の更新を確認できます。
 
 ```powershell
 cargo run --release -- --demo
+cargo run --release -- --media-dir .\demo-media --demo
 ```
 
 リリース exe だけを作る場合は、次を実行します。
