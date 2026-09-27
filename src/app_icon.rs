@@ -4,6 +4,9 @@ const ICON_SIZE: usize = 32;
 
 pub fn app_icon() -> IconData {
     let mut rgba = vec![0; ICON_SIZE * ICON_SIZE * 4];
+    for pixel in rgba.as_chunks_mut::<4>().0.iter_mut() {
+        pixel.copy_from_slice(&[0, 0, 0, 255]);
+    }
     for y in 0..ICON_SIZE {
         for x in 0..ICON_SIZE {
             let in_e = (7..=24).contains(&y)

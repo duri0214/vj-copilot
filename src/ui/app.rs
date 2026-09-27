@@ -553,8 +553,10 @@ impl VjApp {
             .with_inner_size([960.0, 540.0])
             .with_min_inner_size([320.0, 180.0])
             .with_icon(std::sync::Arc::new(app_icon::app_icon()));
+        let icon = std::sync::Arc::new(app_icon::app_icon());
         let mut open = true;
         context.show_viewport_immediate(viewport_id, viewport_builder, |viewport_context, _| {
+            viewport_context.send_viewport_cmd(egui::ViewportCommand::Icon(Some(icon.clone())));
             if viewport_context.input(|input| input.viewport().close_requested()) {
                 open = false;
                 return;
