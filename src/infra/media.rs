@@ -14,7 +14,6 @@ pub const VIDEO_HEIGHT: usize = 180;
 pub const VIDEO_FRAMES_PER_SECOND: usize = 15;
 pub const MAX_VIDEO_SECONDS: usize = 3;
 pub const MAX_VIDEO_FRAMES: usize = VIDEO_FRAMES_PER_SECOND * MAX_VIDEO_SECONDS;
-const MAX_CLIPS: usize = 8;
 const FRAME_BYTES: usize = VIDEO_WIDTH * VIDEO_HEIGHT * 4;
 pub const FOREGROUND_WIDTH: usize = 1920;
 pub const FOREGROUND_HEIGHT: usize = 1080;
@@ -201,13 +200,6 @@ pub fn load_media_directory(media_dir: Option<&Path>) -> MediaLoadReport {
     }
 
     candidates.sort_by(|(left, _), (right, _)| left.id.cmp(&right.id));
-    if candidates.len() > MAX_CLIPS {
-        report.notices.push(format!(
-            "最大 {MAX_CLIPS} 本のため、{} 本の metadata を除外しました",
-            candidates.len() - MAX_CLIPS
-        ));
-        candidates.truncate(MAX_CLIPS);
-    }
 
     if candidates.is_empty() {
         report

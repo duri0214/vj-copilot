@@ -66,4 +66,17 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].as_str(), "two.mp4");
     }
+
+    #[test]
+    fn ranks_all_available_clips_before_limiting_candidates_to_four() {
+        let mut clips = (0..8)
+            .map(|index| clip(&format!("far-{index}.mp4"), 0.0, 0.0))
+            .collect::<Vec<_>>();
+        clips.push(clip("ninth.mp4", 0.5, 0.5));
+
+        let result = rank_clips(FeatureVector::new(0.5, 0.5).unwrap(), &clips);
+
+        assert_eq!(result.len(), 4);
+        assert_eq!(result[0].as_str(), "ninth.mp4");
+    }
 }
