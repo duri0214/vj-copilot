@@ -279,7 +279,7 @@ impl VjApp {
                 painter.image(
                     texture.id(),
                     response.rect,
-                    Rect::EVERYTHING,
+                    Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
                     egui::Color32::WHITE,
                 );
             }
@@ -293,16 +293,19 @@ impl VjApp {
             );
         }
 
-        if let Some(opaque_center) = self.update_foreground_texture(ui.ctx()) {
-            self.paint_foreground(&painter, response.rect, opaque_center, now);
+        if self.update_foreground_texture(ui.ctx()) {
+            self.paint_foreground(&painter, response.rect, now);
         }
         response.on_hover_text("STAGE preview");
     }
 
-    fn update_foreground_texture(&mut self, context: &Context) -> Option<[f32; 2]> {
-        let name = self.selected_foreground.clone()?;
-        let foreground = self.library.foreground(&name)?;
-        let opaque_center = foreground.opaque_center;
+    fn update_foreground_texture(&mut self, context: &Context) -> bool {
+        let Some(name) = self.selected_foreground.clone() else {
+            return false;
+        };
+        let Some(foreground) = self.library.foreground(&name) else {
+            return false;
+        };
         let existing = self.foreground_texture.take();
         self.foreground_texture = Some(match existing {
             Some((existing_name, texture)) if existing_name == name => (existing_name, texture),
@@ -315,16 +318,10 @@ impl VjApp {
                 )
             }
         });
-        Some(opaque_center)
+        true
     }
 
-    fn paint_foreground(
-        &self,
-        painter: &egui::Painter,
-        stage: Rect,
-        opaque_center: [f32; 2],
-        now: Instant,
-    ) {
+    fn paint_foreground(&self, painter: &egui::Painter, stage: Rect, now: Instant) {
         let Some((_, texture)) = &self.foreground_texture else {
             return;
         };
@@ -332,11 +329,15 @@ impl VjApp {
             * std::f32::consts::TAU
             / 3.0;
         let horizontal_scale = phase.cos();
-        let axis_x = stage.left() + stage.width() * opaque_center[0];
-        let x_at_canvas_left = axis_x - stage.width() * opaque_center[0] * horizontal_scale;
+        let axis_x = stage.center().x;
+        let x_at_canvas_left = axis_x - stage.width() * 0.5 * horizontal_scale;
         let x_at_canvas_right = x_at_canvas_left + stage.width() * horizontal_scale;
         let (left, right, uv) = if x_at_canvas_left <= x_at_canvas_right {
-            (x_at_canvas_left, x_at_canvas_right, Rect::EVERYTHING)
+            (
+                x_at_canvas_left,
+                x_at_canvas_right,
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+            )
         } else {
             (
                 x_at_canvas_right,

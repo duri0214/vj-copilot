@@ -34,7 +34,6 @@ pub struct MediaClip {
 pub struct ForegroundImage {
     pub name: String,
     pub rgba: Vec<u8>,
-    pub opaque_center: [f32; 2],
 }
 
 #[derive(Debug, Default)]
@@ -289,45 +288,13 @@ fn load_foreground(path: &Path) -> Result<ForegroundImage, String> {
         ));
     }
     let rgba = image.into_raw();
-    let opaque_center =
-        opaque_center(&rgba).ok_or_else(|| "contains no visible pixels".to_owned())?;
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| "file name is not valid UTF-8".to_owned())?
         .to_owned();
 
-    Ok(ForegroundImage {
-        name,
-        rgba,
-        opaque_center,
-    })
-}
-
-fn opaque_center(rgba: &[u8]) -> Option<[f32; 2]> {
-    let mut min_x = FOREGROUND_WIDTH;
-    let mut min_y = FOREGROUND_HEIGHT;
-    let mut max_x = 0;
-    let mut max_y = 0;
-    let mut found = false;
-
-    for (index, alpha) in rgba.iter().skip(3).step_by(4).enumerate() {
-        if *alpha == 0 {
-            continue;
-        }
-        let x = index % FOREGROUND_WIDTH;
-        let y = index / FOREGROUND_WIDTH;
-        min_x = min_x.min(x);
-        min_y = min_y.min(y);
-        max_x = max_x.max(x);
-        max_y = max_y.max(y);
-        found = true;
-    }
-
-    found.then_some([
-        (min_x + max_x + 1) as f32 / 2.0 / FOREGROUND_WIDTH as f32,
-        (min_y + max_y + 1) as f32 / 2.0 / FOREGROUND_HEIGHT as f32,
-    ])
+    Ok(ForegroundImage { name, rgba })
 }
 
 fn collect_mp4_files(media_dir: &Path) -> Result<BTreeMap<String, PathBuf>, std::io::Error> {
@@ -437,17 +404,6 @@ mod tests {
     }
 
     #[test]
-    fn finds_the_center_of_the_nontransparent_region() {
-        let mut rgba = vec![0; FOREGROUND_WIDTH * FOREGROUND_HEIGHT * 4];
-        for (x, y) in [(1_440, 810), (1_559, 899)] {
-            rgba[(y * FOREGROUND_WIDTH + x) * 4 + 3] = 255;
-        }
-
-        assert_eq!(opaque_center(&rgba), Some([0.78125, 0.791_666_7]));
-        assert_eq!(opaque_center(&vec![0; rgba.len()]), None);
-    }
-
-    #[test]
     fn creates_background_and_foreground_directories() {
         let directory = std::env::temp_dir().join(format!(
             "vj-copilot-media-test-{}",
@@ -483,7 +439,6 @@ mod tests {
         let foreground = load_foreground(&path).unwrap();
 
         assert_eq!(foreground.name, "right.png");
-        assert_eq!(foreground.opaque_center, [0.937_760_4, 0.833_796_3]);
         fs::remove_dir_all(directory).unwrap();
     }
 }
