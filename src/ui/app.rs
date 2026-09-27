@@ -283,14 +283,6 @@ impl VjApp {
                     egui::Color32::WHITE,
                 );
             }
-        } else {
-            painter.text(
-                response.rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "Select a background clip",
-                egui::FontId::proportional(13.0),
-                theme::MUTED,
-            );
         }
 
         if self.update_foreground_texture(ui.ctx()) {
