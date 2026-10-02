@@ -145,6 +145,14 @@ impl ForegroundState {
         }
     }
 
+    fn is_selected(&self, name: &str) -> bool {
+        self.cued.as_deref() == Some(name)
+            || self
+                .live
+                .as_ref()
+                .is_some_and(|live| live.name.as_str() == name)
+    }
+
     fn cue_offset(&self) -> Vec2 {
         self.cued
             .as_ref()
@@ -276,6 +284,23 @@ mod foreground_tests {
         assert!(state.cued.is_none());
         assert!(state.live.is_none());
         assert_eq!(state.offsets["first.png"], Vec2::new(0.25, -0.2));
+    }
+
+    #[test]
+    fn played_material_stays_selected_until_stop() {
+        let mut state = ForegroundState::default();
+        state.toggle_cue("first.png".into());
+        assert!(state.is_selected("first.png"));
+        state.toggle_play();
+        assert!(state.is_selected("first.png"));
+
+        state.toggle_cue("second.png".into());
+        assert!(state.is_selected("first.png"));
+        assert!(state.is_selected("second.png"));
+        state.toggle_cue("second.png".into());
+        state.toggle_play();
+        assert!(!state.is_selected("first.png"));
+        assert!(!state.is_selected("second.png"));
     }
 
     #[test]
@@ -826,7 +851,13 @@ impl VjApp {
                 ui.spacing_mut().item_spacing.x = 12.0;
                 for (column_index, name) in row.iter().enumerate() {
                     let index = row_index * 2 + column_index;
-                    let selected = self.foreground.cued.as_deref() == Some(name.as_str());
+                    let cued = self.foreground.cued.as_deref() == Some(name.as_str());
+                    let live = self
+                        .foreground
+                        .live
+                        .as_ref()
+                        .is_some_and(|live| live.name.as_str() == name.as_str());
+                    let selected = self.foreground.is_selected(name);
                     let texture = self
                         .foreground_preview_textures
                         .entry(name.clone())
@@ -881,8 +912,10 @@ impl VjApp {
                                             .truncate(),
                                     );
                                     ui.label(
-                                        RichText::new(if selected {
-                                            "再クリックで解除"
+                                        RichText::new(if cued {
+                                            "再クリックでプレビュー解除"
+                                        } else if live {
+                                            "出力中・クリックで再調整"
                                         } else {
                                             "クリックでプレビュー"
                                         })
