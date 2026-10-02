@@ -51,6 +51,7 @@ struct PlacedForeground {
 struct ForegroundState {
     selected: Option<String>,
     cued: Option<String>,
+    cue_armed: bool,
     live: Option<PlacedForeground>,
     offsets: HashMap<String, Vec2>,
 }
@@ -58,14 +59,20 @@ struct ForegroundState {
 impl ForegroundState {
     fn cue(&mut self) {
         self.cued = self.selected.clone();
+        self.cue_armed = self.cued.is_some();
     }
 
     fn take(&mut self) {
+        if !self.cue_armed {
+            return;
+        }
         if let Some(name) = &self.cued {
             self.live = Some(PlacedForeground {
                 name: name.clone(),
                 offset: self.offsets.get(name).copied().unwrap_or(Vec2::ZERO),
             });
+            self.cue_armed = false;
+            self.selected = None;
         }
     }
 
@@ -78,12 +85,18 @@ impl ForegroundState {
     }
 
     fn move_cue(&mut self, delta: Vec2) {
+        if !self.cue_armed {
+            return;
+        }
         if let Some(name) = &self.cued {
             *self.offsets.entry(name.clone()).or_default() += delta;
         }
     }
 
     fn reset_cue(&mut self) {
+        if !self.cue_armed {
+            return;
+        }
         if let Some(name) = &self.cued {
             self.offsets.remove(name);
         }
@@ -106,6 +119,11 @@ mod foreground_tests {
 
         state.take();
         let first_live = state.live.clone();
+        assert!(!state.cue_armed);
+        assert!(state.selected.is_none());
+        state.move_cue(Vec2::new(0.1, 0.1));
+        state.reset_cue();
+        assert_eq!(state.cue_offset(), Vec2::new(0.2, 0.3));
         state.selected = Some("second.png".into());
         state.cue();
         state.move_cue(Vec2::new(-0.1, 0.4));
@@ -397,7 +415,7 @@ impl VjApp {
         let size = Vec2::new(width, width * 9.0 / 16.0);
         let (response, painter) = ui.allocate_painter(
             size,
-            if staging {
+            if staging && self.foreground.cue_armed {
                 Sense::drag()
             } else {
                 Sense::hover()
@@ -447,7 +465,7 @@ impl VjApp {
             self.foreground.live.clone()
         };
         if let Some(mut placed) = placed {
-            if staging && response.dragged() {
+            if staging && self.foreground.cue_armed && response.dragged() {
                 let delta = response.drag_delta() / response.rect.size();
                 self.foreground.move_cue(delta);
                 placed.offset = self.foreground.cue_offset();
@@ -455,7 +473,7 @@ impl VjApp {
             self.ensure_foreground_texture(ui.ctx(), &placed.name);
             self.paint_foreground(&painter, response.rect, now, &placed);
         }
-        if staging {
+        if staging && self.foreground.cue_armed {
             response.on_hover_text("STAGING / ドラッグで Foreground を移動");
         }
     }
@@ -562,15 +580,10 @@ impl VjApp {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 theme::caption(ui, "STAGING");
-                if self.foreground.cued.is_some() {
+                if self.foreground.cue_armed {
                     theme::badge(ui, "CUE READY", theme::AMBER);
-                }
-                if let Some(live) = &self.foreground.live {
-                    ui.label(
-                        RichText::new(format!("LIVE  {}", live.name))
-                            .size(10.0)
-                            .color(theme::ACCENT),
-                    );
+                } else if self.foreground.cued.is_some() {
+                    theme::badge(ui, "PLAYED", theme::MUTED);
                 }
             });
             ui.horizontal(|ui| {
@@ -579,43 +592,31 @@ impl VjApp {
                         self.foreground.selected.is_some(),
                         egui::Button::new("● CUE").min_size(Vec2::new(76.0, 30.0)),
                     )
+                    .on_hover_text("選択した素材を STAGING に読み込む")
                     .clicked()
                 {
                     self.foreground.cue();
                 }
                 if ui
                     .add_enabled(
-                        self.foreground.cued.is_some(),
-                        egui::Button::new("▶ PLAY").min_size(Vec2::new(82.0, 30.0)),
+                        self.foreground.cue_armed,
+                        egui::Button::new("↺ RESET POSITION").small(),
                     )
-                    .clicked()
-                {
-                    self.foreground.take();
-                }
-                if ui
-                    .add_enabled(
-                        self.foreground.cued.is_some(),
-                        egui::Button::new("RESET").small(),
-                    )
+                    .on_hover_text("STAGING の位置だけを中央へ戻す")
                     .clicked()
                 {
                     self.foreground.reset_cue();
                 }
-                if ui
-                    .add_enabled(
-                        self.foreground.live.is_some(),
-                        egui::Button::new("CLEAR").small(),
-                    )
-                    .clicked()
-                {
-                    self.foreground.live = None;
-                }
             });
             if let Some(name) = &self.foreground.cued {
                 ui.label(
-                    RichText::new(format!("CUE  {name}  •  ドラッグで位置を調整"))
-                        .size(11.0)
-                        .color(theme::MUTED),
+                    RichText::new(if self.foreground.cue_armed {
+                        format!("CUE  {name}  •  ドラッグで位置を調整")
+                    } else {
+                        format!("{name}  •  次の CUE は素材を選択してから")
+                    })
+                    .size(11.0)
+                    .color(theme::MUTED),
                 );
             } else {
                 ui.label(
@@ -625,6 +626,36 @@ impl VjApp {
                 );
             }
             self.show_stage(ui, Instant::now(), true);
+            ui.add_space(8.0);
+            ui.separator();
+            ui.horizontal(|ui| {
+                theme::caption(ui, "LIVE STAGE");
+                if let Some(live) = &self.foreground.live {
+                    ui.label(RichText::new(&live.name).size(10.0).color(theme::ACCENT));
+                }
+            });
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(
+                        self.foreground.cue_armed,
+                        egui::Button::new("▶ PLAY").min_size(Vec2::new(82.0, 30.0)),
+                    )
+                    .on_hover_text("STAGING の素材と位置を LIVE STAGE に出す")
+                    .clicked()
+                {
+                    self.foreground.take();
+                }
+                if ui
+                    .add_enabled(
+                        self.foreground.live.is_some(),
+                        egui::Button::new("× CLEAR LIVE").small(),
+                    )
+                    .on_hover_text("LIVE STAGE の Foreground だけを消す")
+                    .clicked()
+                {
+                    self.foreground.live = None;
+                }
+            });
         });
     }
 
