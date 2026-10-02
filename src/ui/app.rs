@@ -575,12 +575,7 @@ impl VjApp {
         ui.add_space(8.0);
         theme::panel().show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                theme::caption(ui, "STAGING");
-                if self.foreground.cued.is_some() {
-                    theme::badge(ui, "CUE READY", theme::AMBER);
-                }
-            });
+            theme::caption(ui, "STAGING");
             ui.horizontal(|ui| {
                 let cue_active = self.foreground.cued.is_some();
                 if ui
@@ -632,14 +627,12 @@ impl VjApp {
                 if ui
                     .add_enabled(
                         cue_active || live_active,
-                        egui::Button::new(if cue_active {
-                            "▶ PLAY CUE"
-                        } else if live_active {
+                        egui::Button::new(if !cue_active && live_active {
                             "■ PLAY ON"
                         } else {
                             "▶ PLAY"
                         })
-                        .min_size(Vec2::new(104.0, 30.0))
+                        .min_size(Vec2::new(88.0, 30.0))
                         .fill(if cue_active {
                             theme::AMBER.gamma_multiply(0.25)
                         } else if live_active {
