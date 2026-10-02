@@ -51,27 +51,25 @@ struct PlacedForeground {
 struct ForegroundState {
     selected: Option<String>,
     cued: Option<String>,
-    cue_armed: bool,
     live: Option<PlacedForeground>,
     offsets: HashMap<String, Vec2>,
 }
 
 impl ForegroundState {
-    fn cue(&mut self) {
-        self.cued = self.selected.clone();
-        self.cue_armed = self.cued.is_some();
+    fn toggle_cue(&mut self) {
+        self.cued = if self.cued.is_some() {
+            None
+        } else {
+            self.selected.clone()
+        };
     }
 
     fn take(&mut self) {
-        if !self.cue_armed {
-            return;
-        }
-        if let Some(name) = &self.cued {
+        if let Some(name) = self.cued.take() {
             self.live = Some(PlacedForeground {
-                name: name.clone(),
-                offset: self.offsets.get(name).copied().unwrap_or(Vec2::ZERO),
+                offset: self.offsets.get(&name).copied().unwrap_or(Vec2::ZERO),
+                name,
             });
-            self.cue_armed = false;
             self.selected = None;
         }
     }
@@ -85,20 +83,8 @@ impl ForegroundState {
     }
 
     fn move_cue(&mut self, delta: Vec2) {
-        if !self.cue_armed {
-            return;
-        }
         if let Some(name) = &self.cued {
             *self.offsets.entry(name.clone()).or_default() += delta;
-        }
-    }
-
-    fn reset_cue(&mut self) {
-        if !self.cue_armed {
-            return;
-        }
-        if let Some(name) = &self.cued {
-            self.offsets.remove(name);
         }
     }
 }
@@ -113,19 +99,23 @@ mod foreground_tests {
             selected: Some("first.png".into()),
             ..Default::default()
         };
-        state.cue();
+        state.toggle_cue();
         state.move_cue(Vec2::new(0.2, 0.3));
         assert!(state.live.is_none());
 
         state.take();
         let first_live = state.live.clone();
-        assert!(!state.cue_armed);
+        assert!(state.cued.is_none());
         assert!(state.selected.is_none());
         state.move_cue(Vec2::new(0.1, 0.1));
-        state.reset_cue();
-        assert_eq!(state.cue_offset(), Vec2::new(0.2, 0.3));
+        assert_eq!(state.offsets["first.png"], Vec2::new(0.2, 0.3));
         state.selected = Some("second.png".into());
-        state.cue();
+        state.toggle_cue();
+        state.toggle_cue();
+        assert!(state.cued.is_none());
+        state.take();
+        assert_eq!(state.live, first_live);
+        state.toggle_cue();
         state.move_cue(Vec2::new(-0.1, 0.4));
         assert_eq!(state.live, first_live);
 
@@ -139,20 +129,24 @@ mod foreground_tests {
             selected: Some("first.png".into()),
             ..Default::default()
         };
-        state.cue();
+        state.toggle_cue();
         state.move_cue(Vec2::new(0.25, -0.2));
         state.take();
         state.live = None;
-        assert_eq!(state.cue_offset(), Vec2::new(0.25, -0.2));
+        assert!(state.cued.is_none());
+        assert_eq!(state.offsets["first.png"], Vec2::new(0.25, -0.2));
 
         state.selected = Some("second.png".into());
-        state.cue();
+        state.toggle_cue();
         assert_eq!(state.cue_offset(), Vec2::ZERO);
+        state.toggle_cue();
+        assert!(state.cued.is_none());
         state.selected = Some("first.png".into());
-        state.cue();
+        state.toggle_cue();
         assert_eq!(state.cue_offset(), Vec2::new(0.25, -0.2));
-        state.reset_cue();
-        assert_eq!(state.cue_offset(), Vec2::ZERO);
+        state.toggle_cue();
+        assert!(state.cued.is_none());
+        assert_eq!(state.offsets["first.png"], Vec2::new(0.25, -0.2));
     }
 }
 
@@ -415,7 +409,7 @@ impl VjApp {
         let size = Vec2::new(width, width * 9.0 / 16.0);
         let (response, painter) = ui.allocate_painter(
             size,
-            if staging && self.foreground.cue_armed {
+            if staging && self.foreground.cued.is_some() {
                 Sense::drag()
             } else {
                 Sense::hover()
@@ -465,7 +459,7 @@ impl VjApp {
             self.foreground.live.clone()
         };
         if let Some(mut placed) = placed {
-            if staging && self.foreground.cue_armed && response.dragged() {
+            if staging && self.foreground.cued.is_some() && response.dragged() {
                 let delta = response.drag_delta() / response.rect.size();
                 self.foreground.move_cue(delta);
                 placed.offset = self.foreground.cue_offset();
@@ -473,7 +467,7 @@ impl VjApp {
             self.ensure_foreground_texture(ui.ctx(), &placed.name);
             self.paint_foreground(&painter, response.rect, now, &placed);
         }
-        if staging && self.foreground.cue_armed {
+        if staging && self.foreground.cued.is_some() {
             response.on_hover_text("STAGING / ドラッグで Foreground を移動");
         }
     }
@@ -580,43 +574,38 @@ impl VjApp {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 theme::caption(ui, "STAGING");
-                if self.foreground.cue_armed {
+                if self.foreground.cued.is_some() {
                     theme::badge(ui, "CUE READY", theme::AMBER);
-                } else if self.foreground.cued.is_some() {
-                    theme::badge(ui, "PLAYED", theme::MUTED);
                 }
             });
             ui.horizontal(|ui| {
+                let cue_active = self.foreground.cued.is_some();
                 if ui
                     .add_enabled(
-                        self.foreground.selected.is_some(),
-                        egui::Button::new("● CUE").min_size(Vec2::new(76.0, 30.0)),
+                        cue_active || self.foreground.selected.is_some(),
+                        egui::Button::new(if cue_active { "● CUE ON" } else { "○ CUE" })
+                            .min_size(Vec2::new(88.0, 30.0))
+                            .fill(if cue_active {
+                                theme::AMBER.gamma_multiply(0.25)
+                            } else {
+                                theme::PANEL
+                            }),
                     )
-                    .on_hover_text("選択した素材を STAGING に読み込む")
+                    .on_hover_text(if cue_active {
+                        "STAGING のプレビューを解除する"
+                    } else {
+                        "選択した素材を STAGING に読み込む"
+                    })
                     .clicked()
                 {
-                    self.foreground.cue();
-                }
-                if ui
-                    .add_enabled(
-                        self.foreground.cue_armed,
-                        egui::Button::new("↺ RESET POSITION").small(),
-                    )
-                    .on_hover_text("STAGING の位置だけを中央へ戻す")
-                    .clicked()
-                {
-                    self.foreground.reset_cue();
+                    self.foreground.toggle_cue();
                 }
             });
             if let Some(name) = &self.foreground.cued {
                 ui.label(
-                    RichText::new(if self.foreground.cue_armed {
-                        format!("CUE  {name}  •  ドラッグで位置を調整")
-                    } else {
-                        format!("{name}  •  次の CUE は素材を選択してから")
-                    })
-                    .size(11.0)
-                    .color(theme::MUTED),
+                    RichText::new(format!("CUE  {name}  •  ドラッグで位置調整 / CUE で解除"))
+                        .size(11.0)
+                        .color(theme::MUTED),
                 );
             } else {
                 ui.label(
@@ -637,7 +626,7 @@ impl VjApp {
             ui.horizontal(|ui| {
                 if ui
                     .add_enabled(
-                        self.foreground.cue_armed,
+                        self.foreground.cued.is_some(),
                         egui::Button::new("▶ PLAY").min_size(Vec2::new(82.0, 30.0)),
                     )
                     .on_hover_text("STAGING の素材と位置を LIVE STAGE に出す")
