@@ -690,7 +690,9 @@ impl VjApp {
         ui.add_space(8.0);
         theme::panel().show(ui, |ui| {
             ui.set_width(ui.available_width());
-            theme::caption(ui, "STAGING");
+            if self.foreground.cued.is_some() || self.foreground.live.is_none() {
+                theme::caption(ui, "STAGING");
+            }
             ui.horizontal(|ui| {
                 let cue_active = self.foreground.cued.is_some();
                 let live_active = self.foreground.live.is_some();
@@ -723,34 +725,35 @@ impl VjApp {
                 {
                     self.foreground.toggle_play();
                 }
-                let spin_enabled = self.foreground.cue_spin_enabled();
-                if ui
-                    .add_enabled(
-                        self.foreground.cued.is_some(),
-                        egui::Button::new(if spin_enabled {
-                            "Y SPIN ON"
-                        } else {
-                            "Y SPIN OFF"
-                        })
-                        .min_size(Vec2::new(88.0, 30.0))
-                        .fill(if cue_active && spin_enabled {
-                            theme::ACCENT.gamma_multiply(0.25)
-                        } else {
-                            theme::PANEL
-                        })
-                        .stroke(Stroke::new(
-                            1.0_f32,
-                            if cue_active && spin_enabled {
-                                theme::ACCENT
+                if self.foreground.cued.is_some() {
+                    let spin_enabled = self.foreground.cue_spin_enabled();
+                    if ui
+                        .add(
+                            egui::Button::new(if spin_enabled {
+                                "Y SPIN ON"
                             } else {
-                                theme::BORDER
-                            },
-                        )),
-                    )
-                    .on_hover_text("Y 軸回転を切り替える。PLAY 後の出力にも反映")
-                    .clicked()
-                {
-                    self.foreground.toggle_cue_spin();
+                                "Y SPIN OFF"
+                            })
+                            .min_size(Vec2::new(88.0, 30.0))
+                            .fill(if spin_enabled {
+                                theme::ACCENT.gamma_multiply(0.25)
+                            } else {
+                                theme::PANEL
+                            })
+                            .stroke(Stroke::new(
+                                1.0_f32,
+                                if spin_enabled {
+                                    theme::ACCENT
+                                } else {
+                                    theme::BORDER
+                                },
+                            )),
+                        )
+                        .on_hover_text("Y 軸回転を切り替える。PLAY 後の出力にも反映")
+                        .clicked()
+                    {
+                        self.foreground.toggle_cue_spin();
+                    }
                 }
             });
             if let Some(name) = &self.foreground.cued {
@@ -761,14 +764,14 @@ impl VjApp {
                     .size(11.0)
                     .color(theme::MUTED),
                 );
-            } else {
+                self.show_stage(ui, Instant::now(), true);
+            } else if self.foreground.live.is_none() {
                 ui.label(
                     RichText::new("素材を選ぶと、ここで出力前に確認できます")
                         .size(11.0)
                         .color(theme::MUTED),
                 );
             }
-            self.show_stage(ui, Instant::now(), true);
         });
     }
 
