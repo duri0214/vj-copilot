@@ -40,6 +40,104 @@ enum MediaTab {
     Foreground,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct PlacedForeground {
+    name: String,
+    /// Position as a fraction of the 16:9 stage, independent of window size.
+    offset: Vec2,
+}
+
+#[derive(Default)]
+struct ForegroundState {
+    selected: Option<String>,
+    cued: Option<String>,
+    live: Option<PlacedForeground>,
+    offsets: HashMap<String, Vec2>,
+}
+
+impl ForegroundState {
+    fn cue(&mut self) {
+        self.cued = self.selected.clone();
+    }
+
+    fn take(&mut self) {
+        if let Some(name) = &self.cued {
+            self.live = Some(PlacedForeground {
+                name: name.clone(),
+                offset: self.offsets.get(name).copied().unwrap_or(Vec2::ZERO),
+            });
+        }
+    }
+
+    fn cue_offset(&self) -> Vec2 {
+        self.cued
+            .as_ref()
+            .and_then(|name| self.offsets.get(name))
+            .copied()
+            .unwrap_or(Vec2::ZERO)
+    }
+
+    fn move_cue(&mut self, delta: Vec2) {
+        if let Some(name) = &self.cued {
+            *self.offsets.entry(name.clone()).or_default() += delta;
+        }
+    }
+
+    fn reset_cue(&mut self) {
+        if let Some(name) = &self.cued {
+            self.offsets.remove(name);
+        }
+    }
+}
+
+#[cfg(test)]
+mod foreground_tests {
+    use super::*;
+
+    #[test]
+    fn cue_and_movement_leave_live_unchanged_until_play() {
+        let mut state = ForegroundState {
+            selected: Some("first.png".into()),
+            ..Default::default()
+        };
+        state.cue();
+        state.move_cue(Vec2::new(0.2, 0.3));
+        assert!(state.live.is_none());
+
+        state.take();
+        let first_live = state.live.clone();
+        state.selected = Some("second.png".into());
+        state.cue();
+        state.move_cue(Vec2::new(-0.1, 0.4));
+        assert_eq!(state.live, first_live);
+
+        state.take();
+        assert_eq!(state.live.unwrap().name, "second.png");
+    }
+
+    #[test]
+    fn positions_survive_switching_and_clearing_live() {
+        let mut state = ForegroundState {
+            selected: Some("first.png".into()),
+            ..Default::default()
+        };
+        state.cue();
+        state.move_cue(Vec2::new(0.25, -0.2));
+        state.take();
+        state.live = None;
+        assert_eq!(state.cue_offset(), Vec2::new(0.25, -0.2));
+
+        state.selected = Some("second.png".into());
+        state.cue();
+        assert_eq!(state.cue_offset(), Vec2::ZERO);
+        state.selected = Some("first.png".into());
+        state.cue();
+        assert_eq!(state.cue_offset(), Vec2::new(0.25, -0.2));
+        state.reset_cue();
+        assert_eq!(state.cue_offset(), Vec2::ZERO);
+    }
+}
+
 pub struct AppConfig {
     pub media_dir: Option<PathBuf>,
     pub demo: bool,
@@ -68,13 +166,11 @@ pub struct VjApp {
     candidate_refresh: CandidateRefresh,
     needs_candidate_refresh: bool,
     preview_slots: [PreviewSlot; PREVIEW_SLOT_COUNT],
-    selected_foreground: Option<String>,
+    foreground: ForegroundState,
     media_tab: MediaTab,
     preview_window_open: bool,
     stage_texture: Option<TextureHandle>,
-    foreground_texture: Option<(String, TextureHandle)>,
     foreground_preview_textures: HashMap<String, TextureHandle>,
-    foreground_offset: Vec2,
     started_at: Instant,
     last_animation_at: Instant,
 }
@@ -105,13 +201,11 @@ impl VjApp {
             candidate_refresh: CandidateRefresh::default(),
             needs_candidate_refresh: false,
             preview_slots: std::array::from_fn(|_| PreviewSlot::default()),
-            selected_foreground: None,
+            foreground: ForegroundState::default(),
             media_tab: MediaTab::Background,
             preview_window_open: true,
             stage_texture: None,
-            foreground_texture: None,
             foreground_preview_textures: HashMap::new(),
-            foreground_offset: Vec2::ZERO,
             started_at: now,
             last_animation_at: now,
         }
@@ -231,7 +325,7 @@ impl VjApp {
         if space_pressed {
             match self.media_tab {
                 MediaTab::Background if self.candidates.is_held() => self.resume_auto_mode(),
-                MediaTab::Foreground => self.selected_foreground = None,
+                MediaTab::Foreground => self.foreground.selected = None,
                 _ => {}
             }
         }
@@ -255,7 +349,7 @@ impl VjApp {
             .foregrounds()
             .get(slot)
             .map(|foreground| foreground.name.clone());
-        self.selected_foreground = if selected == self.selected_foreground {
+        self.foreground.selected = if selected == self.foreground.selected {
             None
         } else {
             selected
@@ -296,10 +390,19 @@ impl VjApp {
         }
     }
 
-    fn show_stage(&mut self, ui: &mut Ui, now: Instant) {
-        let width = ui.available_width().min(STAGE_PREVIEW_WIDTH);
+    fn show_stage(&mut self, ui: &mut Ui, now: Instant, staging: bool) {
+        let width = ui
+            .available_width()
+            .min(if staging { 560.0 } else { STAGE_PREVIEW_WIDTH });
         let size = Vec2::new(width, width * 9.0 / 16.0);
-        let (response, painter) = ui.allocate_painter(size, Sense::drag());
+        let (response, painter) = ui.allocate_painter(
+            size,
+            if staging {
+                Sense::drag()
+            } else {
+                Sense::hover()
+            },
+        );
         painter.rect_filled(response.rect, 4.0, theme::BACKGROUND);
 
         let selected_frame = self.candidates.selected_slot().and_then(|slot| {
@@ -335,60 +438,69 @@ impl VjApp {
             }
         }
 
-        if self.update_foreground_texture(ui.ctx()) {
-            if response.dragged() {
-                self.foreground_offset += response.drag_delta();
+        let placed = if staging {
+            self.foreground.cued.as_ref().map(|name| PlacedForeground {
+                name: name.clone(),
+                offset: self.foreground.cue_offset(),
+            })
+        } else {
+            self.foreground.live.clone()
+        };
+        if let Some(mut placed) = placed {
+            if staging && response.dragged() {
+                let delta = response.drag_delta() / response.rect.size();
+                self.foreground.move_cue(delta);
+                placed.offset = self.foreground.cue_offset();
             }
-            self.paint_foreground(&painter, response.rect, now);
+            self.ensure_foreground_texture(ui.ctx(), &placed.name);
+            self.paint_foreground(&painter, response.rect, now, &placed);
         }
-        response.on_hover_text("STAGE preview / Foreground はドラッグで移動");
+        if staging {
+            response.on_hover_text("STAGING / ドラッグで Foreground を移動");
+        }
     }
 
-    fn update_foreground_texture(&mut self, context: &Context) -> bool {
-        let Some(name) = self.selected_foreground.clone() else {
-            return false;
-        };
-        let Some(foreground) = self.library.foreground(&name) else {
-            return false;
-        };
-        let existing = self.foreground_texture.take();
-        let texture_changed =
-            !matches!(&existing, Some((existing_name, _)) if existing_name == &name);
-        self.foreground_texture = Some(match existing {
-            Some((existing_name, texture)) if existing_name == name => (existing_name, texture),
-            _ => {
-                let image = egui::ColorImage::from_rgba_unmultiplied(
-                    [foreground.width, foreground.height],
-                    &foreground.rgba,
-                );
-                (
-                    name,
-                    context.load_texture("stage-foreground", image, TextureOptions::LINEAR),
-                )
-            }
-        });
-        if texture_changed {
-            self.foreground_offset = Vec2::ZERO;
-        }
-        true
-    }
-
-    fn paint_foreground(&self, painter: &egui::Painter, stage: Rect, now: Instant) {
-        let Some((name, texture)) = &self.foreground_texture else {
+    fn ensure_foreground_texture(&mut self, context: &Context, name: &str) {
+        if self.foreground_preview_textures.contains_key(name) {
             return;
-        };
+        }
         let Some(foreground) = self.library.foreground(name) else {
             return;
         };
-        let scale = (stage.width() / foreground.width as f32)
-            .min(stage.height() / foreground.height as f32)
-            .min(1.0);
+        let image = egui::ColorImage::from_rgba_unmultiplied(
+            [foreground.width, foreground.height],
+            &foreground.rgba,
+        );
+        self.foreground_preview_textures.insert(
+            name.to_owned(),
+            context.load_texture(format!("foreground-{name}"), image, TextureOptions::LINEAR),
+        );
+    }
+
+    fn paint_foreground(
+        &self,
+        painter: &egui::Painter,
+        stage: Rect,
+        now: Instant,
+        placed: &PlacedForeground,
+    ) {
+        let Some(texture) = self.foreground_preview_textures.get(&placed.name) else {
+            return;
+        };
+        let Some(foreground) = self.library.foreground(&placed.name) else {
+            return;
+        };
+        let scale = (STAGE_PREVIEW_WIDTH / foreground.width as f32)
+            .min((STAGE_PREVIEW_WIDTH * 9.0 / 16.0) / foreground.height as f32)
+            .min(1.0)
+            * stage.width()
+            / STAGE_PREVIEW_WIDTH;
         let image_size = Vec2::new(
             foreground.width as f32 * scale,
             foreground.height as f32 * scale,
         );
         let image_rect =
-            Rect::from_center_size(stage.center() + self.foreground_offset, image_size);
+            Rect::from_center_size(stage.center() + placed.offset * stage.size(), image_size);
         let pivot = image_rect.min
             + Vec2::new(
                 foreground.opaque_center.0 * scale,
@@ -425,7 +537,11 @@ impl VjApp {
     }
 
     fn show_foreground_controls(&mut self, ui: &mut Ui) {
-        ui.label(RichText::new("候補を選択").size(11.0).color(theme::MUTED));
+        ui.label(
+            RichText::new("候補を選択 → CUE → 配置 → PLAY")
+                .size(11.0)
+                .color(theme::MUTED),
+        );
         if self.library.foregrounds().is_empty() {
             ui.label(
                 RichText::new("foreground/ に透過 PNG を追加してください")
@@ -441,6 +557,75 @@ impl VjApp {
             .map(|foreground| foreground.name.clone())
             .collect::<Vec<_>>();
         self.show_foreground_grid(ui, &names);
+        ui.add_space(8.0);
+        theme::panel().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                theme::caption(ui, "STAGING");
+                if self.foreground.cued.is_some() {
+                    theme::badge(ui, "CUE READY", theme::AMBER);
+                }
+                if let Some(live) = &self.foreground.live {
+                    ui.label(
+                        RichText::new(format!("LIVE  {}", live.name))
+                            .size(10.0)
+                            .color(theme::ACCENT),
+                    );
+                }
+            });
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(
+                        self.foreground.selected.is_some(),
+                        egui::Button::new("● CUE").min_size(Vec2::new(76.0, 30.0)),
+                    )
+                    .clicked()
+                {
+                    self.foreground.cue();
+                }
+                if ui
+                    .add_enabled(
+                        self.foreground.cued.is_some(),
+                        egui::Button::new("▶ PLAY").min_size(Vec2::new(82.0, 30.0)),
+                    )
+                    .clicked()
+                {
+                    self.foreground.take();
+                }
+                if ui
+                    .add_enabled(
+                        self.foreground.cued.is_some(),
+                        egui::Button::new("RESET").small(),
+                    )
+                    .clicked()
+                {
+                    self.foreground.reset_cue();
+                }
+                if ui
+                    .add_enabled(
+                        self.foreground.live.is_some(),
+                        egui::Button::new("CLEAR").small(),
+                    )
+                    .clicked()
+                {
+                    self.foreground.live = None;
+                }
+            });
+            if let Some(name) = &self.foreground.cued {
+                ui.label(
+                    RichText::new(format!("CUE  {name}  •  ドラッグで位置を調整"))
+                        .size(11.0)
+                        .color(theme::MUTED),
+                );
+            } else {
+                ui.label(
+                    RichText::new("素材を選んで CUE を押すと、ここで出力前に確認できます")
+                        .size(11.0)
+                        .color(theme::MUTED),
+                );
+            }
+            self.show_stage(ui, Instant::now(), true);
+        });
     }
 
     fn show_foreground_grid(&mut self, ui: &mut Ui, names: &[String]) {
@@ -450,7 +635,7 @@ impl VjApp {
                 ui.spacing_mut().item_spacing.x = 12.0;
                 for (column_index, name) in row.iter().enumerate() {
                     let index = row_index * 2 + column_index;
-                    let selected = self.selected_foreground.as_deref() == Some(name.as_str());
+                    let selected = self.foreground.selected.as_deref() == Some(name.as_str());
                     let texture = self
                         .foreground_preview_textures
                         .entry(name.clone())
@@ -519,7 +704,7 @@ impl VjApp {
                         Sense::click(),
                     );
                     if response.clicked() {
-                        self.selected_foreground = Some(name.clone());
+                        self.foreground.selected = Some(name.clone());
                     }
                 }
             });
@@ -563,7 +748,7 @@ impl VjApp {
             egui::CentralPanel::default()
                 .frame(Frame::new().fill(theme::BACKGROUND))
                 .show(viewport_context, |ui| {
-                    self.show_stage(ui, Instant::now());
+                    self.show_stage(ui, Instant::now(), false);
                 });
             viewport_context.request_repaint_after(Duration::from_millis(16));
         });
