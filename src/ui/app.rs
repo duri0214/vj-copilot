@@ -669,33 +669,30 @@ impl VjApp {
             ui.horizontal(|ui| {
                 let cue_active = self.foreground.cued.is_some();
                 let live_active = self.foreground.live.is_some();
+                let stop_active = !cue_active && live_active;
                 if ui
                     .add_enabled(
                         cue_active || live_active,
-                        egui::Button::new(if !cue_active && live_active {
-                            "■ STOP"
-                        } else {
-                            "▶ PLAY"
-                        })
-                        .min_size(Vec2::new(88.0, 30.0))
-                        .fill(if cue_active || live_active {
-                            theme::ACCENT.gamma_multiply(0.38)
-                        } else {
-                            theme::PANEL
-                        })
-                        .stroke(Stroke::new(
-                            1.0_f32,
-                            if cue_active || live_active {
-                                theme::ACCENT
+                        egui::Button::new(if stop_active { "■ STOP" } else { "▶ PLAY" })
+                            .min_size(Vec2::new(88.0, 30.0))
+                            .fill(if stop_active {
+                                theme::ACCENT.gamma_multiply(0.38)
                             } else {
-                                theme::BORDER
-                            },
-                        )),
+                                theme::PANEL
+                            })
+                            .stroke(Stroke::new(
+                                1.0_f32,
+                                if stop_active {
+                                    theme::ACCENT
+                                } else {
+                                    theme::BORDER
+                                },
+                            )),
                     )
                     .on_hover_text(if cue_active {
-                        "STAGING の素材と位置を LIVE STAGE に出す"
+                        "STAGING の素材と位置を STAGE に出す"
                     } else {
-                        "LIVE STAGE の Foreground を消す"
+                        "STAGE の Foreground を消す"
                     })
                     .clicked()
                 {
@@ -747,14 +744,6 @@ impl VjApp {
                 );
             }
             self.show_stage(ui, Instant::now(), true);
-            ui.add_space(8.0);
-            ui.separator();
-            ui.horizontal(|ui| {
-                theme::caption(ui, "LIVE STAGE");
-                if let Some(live) = &self.foreground.live {
-                    ui.label(RichText::new(&live.name).size(10.0).color(theme::ACCENT));
-                }
-            });
         });
     }
 
