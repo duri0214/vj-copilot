@@ -180,6 +180,23 @@ impl ForegroundState {
     }
 }
 
+fn clear_selected_media(
+    tab: MediaTab,
+    foreground: &mut ForegroundState,
+    candidates: &mut CandidateState,
+) -> bool {
+    match tab {
+        MediaTab::Foreground => {
+            foreground.clear();
+            false
+        }
+        MediaTab::Background => {
+            candidates.release();
+            true
+        }
+    }
+}
+
 #[cfg(test)]
 mod foreground_tests {
     use super::*;
@@ -259,6 +276,34 @@ mod foreground_tests {
         assert!(state.cued.is_none());
         assert!(state.live.is_none());
         assert_eq!(state.offsets["first.png"], Vec2::new(0.25, -0.2));
+    }
+
+    #[test]
+    fn space_clears_only_the_active_media_tab() {
+        let mut foreground = ForegroundState::default();
+        foreground.toggle_cue("front.png".into());
+        foreground.toggle_play();
+        let mut candidates = CandidateState::default();
+        candidates.update_ranked(&[ClipId::new("back.mp4").unwrap()]);
+        assert!(candidates.select(0));
+
+        assert!(!clear_selected_media(
+            MediaTab::Foreground,
+            &mut foreground,
+            &mut candidates,
+        ));
+        assert!(foreground.live.is_none());
+        assert_eq!(candidates.selected_slot(), Some(0));
+
+        foreground.toggle_cue("front.png".into());
+        foreground.toggle_play();
+        assert!(clear_selected_media(
+            MediaTab::Background,
+            &mut foreground,
+            &mut candidates,
+        ));
+        assert!(!candidates.is_held());
+        assert!(foreground.live.is_some());
     }
 }
 
@@ -428,22 +473,27 @@ impl VjApp {
         }
     }
 
-    fn handle_space_shortcut(&mut self, context: &Context) {
-        let has_selection = self.foreground.cued.is_some()
-            || self.foreground.live.is_some()
-            || self.candidates.is_held();
+    fn handle_space_shortcut(&mut self, context: &Context, tab: MediaTab) {
+        let has_selection = match tab {
+            MediaTab::Background => self.candidates.is_held(),
+            MediaTab::Foreground => {
+                self.foreground.cued.is_some() || self.foreground.live.is_some()
+            }
+        };
         if has_selection
             && context.input_mut(|input| input.consume_key(egui::Modifiers::NONE, Key::Space))
         {
-            self.foreground.clear();
-            if self.candidates.is_held() {
-                self.resume_auto_mode();
+            let released_background =
+                clear_selected_media(tab, &mut self.foreground, &mut self.candidates);
+            if released_background {
+                self.candidate_refresh.reset();
+                self.needs_candidate_refresh = true;
             }
         }
     }
 
     fn handle_shortcuts(&mut self, context: &Context) {
-        self.handle_space_shortcut(context);
+        self.handle_space_shortcut(context, self.media_tab);
         if context.wants_keyboard_input() {
             return;
         }
@@ -485,12 +535,6 @@ impl VjApp {
         if self.candidates.select(slot) {
             self.needs_candidate_refresh = false;
         }
-    }
-
-    fn resume_auto_mode(&mut self) {
-        self.candidates.release();
-        self.candidate_refresh.reset();
-        self.needs_candidate_refresh = true;
     }
 
     fn advance_animation(&mut self, now: Instant) {
@@ -759,7 +803,7 @@ impl VjApp {
             if let Some(name) = &self.foreground.cued {
                 ui.label(
                     RichText::new(format!(
-                        "{name}  •  ドラッグで位置調整 / 再クリックでプレビュー解除 / SPACE で全解除"
+                        "{name}  •  ドラッグで位置調整 / 再クリックでプレビュー解除 / SPACE でフロント解除"
                     ))
                     .size(11.0)
                     .color(theme::MUTED),
@@ -910,7 +954,7 @@ impl VjApp {
                 return;
             }
 
-            self.handle_space_shortcut(viewport_context);
+            self.handle_space_shortcut(viewport_context, MediaTab::Foreground);
 
             egui::CentralPanel::default()
                 .frame(Frame::new().fill(theme::BACKGROUND))
@@ -1328,7 +1372,7 @@ impl eframe::App for VjApp {
                     self.show_media_tabs(ui);
                     ui.add_space(4.0);
                     ui.label(
-                        RichText::new("← →  タブ切替     1—4  選択     SPACE  全解除")
+                        RichText::new("← →  タブ切替     1—4  選択     SPACE  選択解除")
                             .monospace()
                             .size(11.0)
                             .color(theme::MUTED),
