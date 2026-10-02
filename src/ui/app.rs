@@ -56,6 +56,11 @@ struct ForegroundState {
 }
 
 impl ForegroundState {
+    fn select_cue(&mut self, name: String) {
+        self.selected = Some(name.clone());
+        self.cued = Some(name);
+    }
+
     fn toggle_cue(&mut self) {
         self.cued = if self.cued.is_some() {
             None
@@ -89,6 +94,11 @@ impl ForegroundState {
             *self.offsets.entry(name.clone()).or_default() += delta;
         }
     }
+
+    fn clear_selection(&mut self) {
+        self.selected = None;
+        self.cued = None;
+    }
 }
 
 #[cfg(test)]
@@ -97,11 +107,8 @@ mod foreground_tests {
 
     #[test]
     fn cue_and_movement_leave_live_unchanged_until_play() {
-        let mut state = ForegroundState {
-            selected: Some("first.png".into()),
-            ..Default::default()
-        };
-        state.toggle_cue();
+        let mut state = ForegroundState::default();
+        state.select_cue("first.png".into());
         state.move_cue(Vec2::new(0.2, 0.3));
         assert!(state.live.is_none());
 
@@ -111,8 +118,7 @@ mod foreground_tests {
         assert!(state.selected.is_none());
         state.move_cue(Vec2::new(0.1, 0.1));
         assert_eq!(state.offsets["first.png"], Vec2::new(0.2, 0.3));
-        state.selected = Some("second.png".into());
-        state.toggle_cue();
+        state.select_cue("second.png".into());
         state.toggle_cue();
         assert!(state.cued.is_none());
         assert_eq!(state.live, first_live);
@@ -128,24 +134,19 @@ mod foreground_tests {
 
     #[test]
     fn positions_survive_switching_and_clearing_live() {
-        let mut state = ForegroundState {
-            selected: Some("first.png".into()),
-            ..Default::default()
-        };
-        state.toggle_cue();
+        let mut state = ForegroundState::default();
+        state.select_cue("first.png".into());
         state.move_cue(Vec2::new(0.25, -0.2));
         state.toggle_play();
         state.toggle_play();
         assert!(state.cued.is_none());
         assert_eq!(state.offsets["first.png"], Vec2::new(0.25, -0.2));
 
-        state.selected = Some("second.png".into());
-        state.toggle_cue();
+        state.select_cue("second.png".into());
         assert_eq!(state.cue_offset(), Vec2::ZERO);
         state.toggle_cue();
         assert!(state.cued.is_none());
-        state.selected = Some("first.png".into());
-        state.toggle_cue();
+        state.select_cue("first.png".into());
         assert_eq!(state.cue_offset(), Vec2::new(0.25, -0.2));
         state.toggle_cue();
         assert!(state.cued.is_none());
@@ -340,7 +341,7 @@ impl VjApp {
         if space_pressed {
             match self.media_tab {
                 MediaTab::Background if self.candidates.is_held() => self.resume_auto_mode(),
-                MediaTab::Foreground => self.foreground.selected = None,
+                MediaTab::Foreground => self.foreground.clear_selection(),
                 _ => {}
             }
         }
@@ -359,16 +360,9 @@ impl VjApp {
     }
 
     fn select_foreground_slot(&mut self, slot: usize) {
-        let selected = self
-            .library
-            .foregrounds()
-            .get(slot)
-            .map(|foreground| foreground.name.clone());
-        self.foreground.selected = if selected == self.foreground.selected {
-            None
-        } else {
-            selected
-        };
+        if let Some(foreground) = self.library.foregrounds().get(slot) {
+            self.foreground.select_cue(foreground.name.clone());
+        }
     }
 
     fn select_slot(&mut self, slot: usize) {
@@ -553,7 +547,7 @@ impl VjApp {
 
     fn show_foreground_controls(&mut self, ui: &mut Ui) {
         ui.label(
-            RichText::new("候補を選択 → CUE → 配置 → PLAY")
+            RichText::new("候補を選択 → 配置 → PLAY")
                 .size(11.0)
                 .color(theme::MUTED),
         );
@@ -607,7 +601,7 @@ impl VjApp {
                 );
             } else {
                 ui.label(
-                    RichText::new("素材を選んで CUE を押すと、ここで出力前に確認できます")
+                    RichText::new("素材を選ぶと、ここで出力前に確認できます")
                         .size(11.0)
                         .color(theme::MUTED),
                 );
@@ -633,13 +627,19 @@ impl VjApp {
                             "▶ PLAY"
                         })
                         .min_size(Vec2::new(88.0, 30.0))
-                        .fill(if cue_active {
-                            theme::AMBER.gamma_multiply(0.25)
-                        } else if live_active {
-                            theme::ACCENT.gamma_multiply(0.25)
+                        .fill(if cue_active || live_active {
+                            theme::ACCENT.gamma_multiply(0.38)
                         } else {
                             theme::PANEL
-                        }),
+                        })
+                        .stroke(Stroke::new(
+                            1.0_f32,
+                            if cue_active || live_active {
+                                theme::ACCENT
+                            } else {
+                                theme::BORDER
+                            },
+                        )),
                     )
                     .on_hover_text(if cue_active {
                         "STAGING の素材と位置を LIVE STAGE に出す"
@@ -661,7 +661,7 @@ impl VjApp {
                 ui.spacing_mut().item_spacing.x = 12.0;
                 for (column_index, name) in row.iter().enumerate() {
                     let index = row_index * 2 + column_index;
-                    let selected = self.foreground.selected.as_deref() == Some(name.as_str());
+                    let selected = self.foreground.cued.as_deref() == Some(name.as_str());
                     let texture = self
                         .foreground_preview_textures
                         .entry(name.clone())
@@ -716,7 +716,7 @@ impl VjApp {
                                             .truncate(),
                                     );
                                     ui.label(
-                                        RichText::new("クリックで選択")
+                                        RichText::new("クリックで CUE")
                                             .size(10.0)
                                             .color(theme::MUTED),
                                     );
@@ -730,7 +730,7 @@ impl VjApp {
                         Sense::click(),
                     );
                     if response.clicked() {
-                        self.foreground.selected = Some(name.clone());
+                        self.foreground.select_cue(name.clone());
                     }
                 }
             });

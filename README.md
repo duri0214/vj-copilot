@@ -99,7 +99,7 @@ Background は `background` 直下へ MP4 と `background-metadata.json` を置�
 
 Foreground は `foreground` 直下へ透過 PNG を置きます。画像サイズは任意で、透明でない部分の中心を軸に表示・反転します。子フォルダ内の PNG、完全に透明な PNG、読み込めない PNG は候補から除外されます。
 
-Foreground を選び、`CUE` を押すと操作画面の STAGING に表示されます。`CUE ON` の間は STAGING 上でドラッグして位置を調整でき、もう一度 CUE を押すとプレビューが消えます。この操作では STAGE ウィンドウの表示は変わりません。LIVE STAGE 欄の `PLAY` を押すと調整した素材と位置が出力され、CUE は OFF に戻ります。出力中はボタンが `PLAY ON` になり、もう一度押すと LIVE の Foreground が消えます。次の素材を CUE した場合は `PLAY` でそのまま切り替わります。STAGING と STAGE は同じ画面比率と素材サイズで Y 軸回転を表示します。素材ごとの CUE 位置はアプリの起動中保持されます。
+Foreground を選ぶとカードがミク色になり、同時に `CUE ON` として操作画面の STAGING に表示されます。STAGING 上でドラッグして位置を調整でき、CUE ボタンを押すとプレビューが消えます。この操作では STAGE ウィンドウの表示は変わりません。LIVE STAGE 欄の緑色の `PLAY` を押すと調整した素材と位置が出力され、CUE は OFF に戻ります。出力中はボタンが `PLAY ON` になり、もう一度押すと LIVE の Foreground が消えます。次の素材を選んだ場合は `PLAY` でそのまま切り替わります。STAGING と STAGE は同じ画面比率と素材サイズで Y 軸回転を表示します。素材ごとの CUE 位置はアプリの起動中保持されます。
 
 ## 5. 操作する
 
@@ -107,7 +107,7 @@ Foreground を選び、`CUE` を押すと操作画面の STAGING に表示され
 
 - Background 候補をクリックするか、`1`〜`4` キーで選択します。選択中は候補の自動更新が止まります。
 - `Space` で Background の選択を解除し、候補の自動更新を再開します。
-- Foreground 候補をクリックするか `1`〜`4` キーで選択し、`CUE` → 位置調整 → `PLAY` の順に操作します。`Space` は候補の選択だけを解除します。
+- Foreground 候補をクリックするか `1`〜`4` キーで CUE に読み込み、位置調整 → `PLAY` の順に操作します。`Space` は CUE と候補の選択を解除します。
 - STAGE ウィンドウを閉じた場合は、操作画面の `OPEN STAGE WINDOW` から再表示できます。
 - STAGE ウィンドウはプロジェクタやサブディスプレイへ移動できます。
 
