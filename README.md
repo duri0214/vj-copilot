@@ -28,7 +28,7 @@ ffmpeg -version
 .\scripts\generate-background-metadata.ps1
 ```
 
-同梱の `demo-media\foreground\neon-prism-right.png` と合わせて、Background と Foreground の表示をすぐに試せます。生成した MP4 は Git 管理外です。別のフォルダへ生成する場合は `-OutputDir` を指定します。
+同梱の Foreground 2 点（`neon-orbit-left.png` と `neon-prism-right.png`）と合わせて、Background と Foreground の表示・素材切り替えをすぐに試せます。生成した MP4 は Git 管理外です。別のフォルダへ生成する場合は `-OutputDir` を指定します。
 
 ## 3. 起動する
 
