@@ -174,8 +174,9 @@ impl ForegroundState {
         }
     }
 
-    fn clear_selection(&mut self) {
+    fn clear(&mut self) {
         self.cued = None;
+        self.live = None;
     }
 }
 
@@ -203,12 +204,12 @@ mod foreground_tests {
         assert!(state.cued.is_none());
         assert_eq!(state.live, first_live);
         state.toggle_cue("second.png".into());
-        state.clear_selection();
+        state.clear();
         assert!(state.cued.is_none());
-        assert_eq!(state.live, first_live);
+        assert!(state.live.is_none());
         state.toggle_cue("second.png".into());
         state.move_cue(Vec2::new(-0.1, 0.4));
-        assert_eq!(state.live, first_live);
+        assert!(state.live.is_none());
 
         state.toggle_play();
         assert_eq!(state.live.as_ref().unwrap().name, "second.png");
@@ -240,6 +241,24 @@ mod foreground_tests {
         assert_eq!(state.offsets["first.png"], Vec2::new(0.25, -0.2));
         state.toggle_cue("first.png".into());
         assert!(!state.cue_spin_enabled());
+    }
+
+    #[test]
+    fn clear_returns_preview_and_output_to_unselected_state() {
+        let mut state = ForegroundState::default();
+        state.toggle_cue("first.png".into());
+        state.move_cue(Vec2::new(0.25, -0.2));
+        state.clear();
+        assert!(state.cued.is_none());
+        assert!(state.live.is_none());
+
+        state.toggle_cue("first.png".into());
+        state.toggle_play();
+        state.toggle_cue("second.png".into());
+        state.clear();
+        assert!(state.cued.is_none());
+        assert!(state.live.is_none());
+        assert_eq!(state.offsets["first.png"], Vec2::new(0.25, -0.2));
     }
 }
 
@@ -409,7 +428,22 @@ impl VjApp {
         }
     }
 
+    fn handle_space_shortcut(&mut self, context: &Context) {
+        let has_selection = self.foreground.cued.is_some()
+            || self.foreground.live.is_some()
+            || self.candidates.is_held();
+        if has_selection
+            && context.input_mut(|input| input.consume_key(egui::Modifiers::NONE, Key::Space))
+        {
+            self.foreground.clear();
+            if self.candidates.is_held() {
+                self.resume_auto_mode();
+            }
+        }
+    }
+
     fn handle_shortcuts(&mut self, context: &Context) {
+        self.handle_space_shortcut(context);
         if context.wants_keyboard_input() {
             return;
         }
@@ -428,15 +462,6 @@ impl VjApp {
                 (MediaTab::Foreground, _) => MediaTab::Background,
             };
         }
-        let space_pressed = context.input(|input| input.key_pressed(Key::Space));
-        if space_pressed {
-            match self.media_tab {
-                MediaTab::Background if self.candidates.is_held() => self.resume_auto_mode(),
-                MediaTab::Foreground => self.foreground.clear_selection(),
-                _ => {}
-            }
-        }
-
         let selected_slot = context.input(|input| {
             [Key::Num1, Key::Num2, Key::Num3, Key::Num4]
                 .iter()
@@ -731,7 +756,7 @@ impl VjApp {
             if let Some(name) = &self.foreground.cued {
                 ui.label(
                     RichText::new(format!(
-                        "{name}  •  ドラッグで位置調整 / 再クリックか SPACE で解除"
+                        "{name}  •  ドラッグで位置調整 / 再クリックでプレビュー解除 / SPACE で全解除"
                     ))
                     .size(11.0)
                     .color(theme::MUTED),
@@ -881,6 +906,8 @@ impl VjApp {
                 open = false;
                 return;
             }
+
+            self.handle_space_shortcut(viewport_context);
 
             egui::CentralPanel::default()
                 .frame(Frame::new().fill(theme::BACKGROUND))
@@ -1298,7 +1325,7 @@ impl eframe::App for VjApp {
                     self.show_media_tabs(ui);
                     ui.add_space(4.0);
                     ui.label(
-                        RichText::new("← →  タブ切替     1—4  選択     SPACE  選択解除")
+                        RichText::new("← →  タブ切替     1—4  選択     SPACE  全解除")
                             .monospace()
                             .size(11.0)
                             .color(theme::MUTED),
