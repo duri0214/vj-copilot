@@ -118,7 +118,6 @@ struct PlacedForeground {
 
 #[derive(Default)]
 struct ForegroundState {
-    selected: Option<String>,
     cued: Option<String>,
     live: Option<PlacedForeground>,
     offsets: HashMap<String, Vec2>,
@@ -126,16 +125,11 @@ struct ForegroundState {
 }
 
 impl ForegroundState {
-    fn select_cue(&mut self, name: String) {
-        self.selected = Some(name.clone());
-        self.cued = Some(name);
-    }
-
-    fn toggle_cue(&mut self) {
-        self.cued = if self.cued.is_some() {
+    fn toggle_cue(&mut self, name: String) {
+        self.cued = if self.cued.as_deref() == Some(name.as_str()) {
             None
         } else {
-            self.selected.clone()
+            Some(name)
         };
     }
 
@@ -146,7 +140,6 @@ impl ForegroundState {
                 spin_enabled: self.spins.get(&name).copied().unwrap_or(true),
                 name,
             });
-            self.selected = None;
         } else {
             self.live = None;
         }
@@ -182,7 +175,6 @@ impl ForegroundState {
     }
 
     fn clear_selection(&mut self) {
-        self.selected = None;
         self.cued = None;
     }
 }
@@ -194,7 +186,7 @@ mod foreground_tests {
     #[test]
     fn cue_and_movement_leave_live_unchanged_until_play() {
         let mut state = ForegroundState::default();
-        state.select_cue("first.png".into());
+        state.toggle_cue("first.png".into());
         state.move_cue(Vec2::new(0.2, 0.3));
         state.toggle_cue_spin();
         assert!(state.live.is_none());
@@ -203,15 +195,18 @@ mod foreground_tests {
         let first_live = state.live.clone();
         assert!(!first_live.as_ref().unwrap().spin_enabled);
         assert!(state.cued.is_none());
-        assert!(state.selected.is_none());
         state.move_cue(Vec2::new(0.1, 0.1));
         assert_eq!(state.offsets["first.png"], Vec2::new(0.2, 0.3));
-        state.select_cue("second.png".into());
+        state.toggle_cue("second.png".into());
         assert!(state.cue_spin_enabled());
-        state.toggle_cue();
+        state.toggle_cue("second.png".into());
         assert!(state.cued.is_none());
         assert_eq!(state.live, first_live);
-        state.toggle_cue();
+        state.toggle_cue("second.png".into());
+        state.clear_selection();
+        assert!(state.cued.is_none());
+        assert_eq!(state.live, first_live);
+        state.toggle_cue("second.png".into());
         state.move_cue(Vec2::new(-0.1, 0.4));
         assert_eq!(state.live, first_live);
 
@@ -225,25 +220,25 @@ mod foreground_tests {
     #[test]
     fn positions_survive_switching_and_clearing_live() {
         let mut state = ForegroundState::default();
-        state.select_cue("first.png".into());
+        state.toggle_cue("first.png".into());
         state.move_cue(Vec2::new(0.25, -0.2));
         state.toggle_play();
         state.toggle_play();
         assert!(state.cued.is_none());
         assert_eq!(state.offsets["first.png"], Vec2::new(0.25, -0.2));
 
-        state.select_cue("second.png".into());
+        state.toggle_cue("second.png".into());
         assert_eq!(state.cue_offset(), Vec2::ZERO);
-        state.toggle_cue();
+        state.toggle_cue("second.png".into());
         assert!(state.cued.is_none());
-        state.select_cue("first.png".into());
+        state.toggle_cue("first.png".into());
         assert_eq!(state.cue_offset(), Vec2::new(0.25, -0.2));
         assert!(state.cue_spin_enabled());
         state.toggle_cue_spin();
-        state.toggle_cue();
+        state.toggle_cue("first.png".into());
         assert!(state.cued.is_none());
         assert_eq!(state.offsets["first.png"], Vec2::new(0.25, -0.2));
-        state.select_cue("first.png".into());
+        state.toggle_cue("first.png".into());
         assert!(!state.cue_spin_enabled());
     }
 }
@@ -457,7 +452,7 @@ impl VjApp {
 
     fn select_foreground_slot(&mut self, slot: usize) {
         if let Some(foreground) = self.library.foregrounds().get(slot) {
-            self.foreground.select_cue(foreground.name.clone());
+            self.foreground.toggle_cue(foreground.name.clone());
         }
     }
 
@@ -673,66 +668,6 @@ impl VjApp {
             theme::caption(ui, "STAGING");
             ui.horizontal(|ui| {
                 let cue_active = self.foreground.cued.is_some();
-                if ui
-                    .add_enabled(
-                        cue_active || self.foreground.selected.is_some(),
-                        egui::Button::new(if cue_active { "● CUE ON" } else { "○ CUE" })
-                            .min_size(Vec2::new(88.0, 30.0))
-                            .fill(if cue_active {
-                                theme::AMBER.gamma_multiply(0.25)
-                            } else {
-                                theme::PANEL
-                            }),
-                    )
-                    .on_hover_text(if cue_active {
-                        "STAGING のプレビューを解除する"
-                    } else {
-                        "選択した素材を STAGING に読み込む"
-                    })
-                    .clicked()
-                {
-                    self.foreground.toggle_cue();
-                }
-                if ui
-                    .add_enabled(
-                        self.foreground.cued.is_some(),
-                        egui::Button::new(if self.foreground.cue_spin_enabled() {
-                            "Y SPIN ON"
-                        } else {
-                            "Y SPIN OFF"
-                        })
-                        .small(),
-                    )
-                    .on_hover_text("Y 軸回転を切り替える。PLAY 後の出力にも反映")
-                    .clicked()
-                {
-                    self.foreground.toggle_cue_spin();
-                }
-            });
-            if let Some(name) = &self.foreground.cued {
-                ui.label(
-                    RichText::new(format!("CUE  {name}  •  ドラッグで位置調整 / CUE で解除"))
-                        .size(11.0)
-                        .color(theme::MUTED),
-                );
-            } else {
-                ui.label(
-                    RichText::new("素材を選ぶと、ここで出力前に確認できます")
-                        .size(11.0)
-                        .color(theme::MUTED),
-                );
-            }
-            self.show_stage(ui, Instant::now(), true);
-            ui.add_space(8.0);
-            ui.separator();
-            ui.horizontal(|ui| {
-                theme::caption(ui, "LIVE STAGE");
-                if let Some(live) = &self.foreground.live {
-                    ui.label(RichText::new(&live.name).size(10.0).color(theme::ACCENT));
-                }
-            });
-            ui.horizontal(|ui| {
-                let cue_active = self.foreground.cued.is_some();
                 let live_active = self.foreground.live.is_some();
                 if ui
                     .add_enabled(
@@ -765,6 +700,59 @@ impl VjApp {
                     .clicked()
                 {
                     self.foreground.toggle_play();
+                }
+                let spin_enabled = self.foreground.cue_spin_enabled();
+                if ui
+                    .add_enabled(
+                        self.foreground.cued.is_some(),
+                        egui::Button::new(if spin_enabled {
+                            "Y SPIN ON"
+                        } else {
+                            "Y SPIN OFF"
+                        })
+                        .min_size(Vec2::new(88.0, 30.0))
+                        .fill(if cue_active && spin_enabled {
+                            theme::ACCENT.gamma_multiply(0.25)
+                        } else {
+                            theme::PANEL
+                        })
+                        .stroke(Stroke::new(
+                            1.0_f32,
+                            if cue_active && spin_enabled {
+                                theme::ACCENT
+                            } else {
+                                theme::BORDER
+                            },
+                        )),
+                    )
+                    .on_hover_text("Y 軸回転を切り替える。PLAY 後の出力にも反映")
+                    .clicked()
+                {
+                    self.foreground.toggle_cue_spin();
+                }
+            });
+            if let Some(name) = &self.foreground.cued {
+                ui.label(
+                    RichText::new(format!(
+                        "{name}  •  ドラッグで位置調整 / 再クリックか SPACE で解除"
+                    ))
+                    .size(11.0)
+                    .color(theme::MUTED),
+                );
+            } else {
+                ui.label(
+                    RichText::new("素材を選ぶと、ここで出力前に確認できます")
+                        .size(11.0)
+                        .color(theme::MUTED),
+                );
+            }
+            self.show_stage(ui, Instant::now(), true);
+            ui.add_space(8.0);
+            ui.separator();
+            ui.horizontal(|ui| {
+                theme::caption(ui, "LIVE STAGE");
+                if let Some(live) = &self.foreground.live {
+                    ui.label(RichText::new(&live.name).size(10.0).color(theme::ACCENT));
                 }
             });
         });
@@ -832,9 +820,13 @@ impl VjApp {
                                             .truncate(),
                                     );
                                     ui.label(
-                                        RichText::new("クリックで CUE")
-                                            .size(10.0)
-                                            .color(theme::MUTED),
+                                        RichText::new(if selected {
+                                            "再クリックで解除"
+                                        } else {
+                                            "クリックでプレビュー"
+                                        })
+                                        .size(10.0)
+                                        .color(theme::MUTED),
                                     );
                                 });
                             });
@@ -846,7 +838,7 @@ impl VjApp {
                         Sense::click(),
                     );
                     if response.clicked() {
-                        self.foreground.select_cue(name.clone());
+                        self.foreground.toggle_cue(name.clone());
                     }
                 }
             });
