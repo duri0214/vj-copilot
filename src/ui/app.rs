@@ -45,6 +45,7 @@ struct PlacedForeground {
     name: String,
     /// Position as a fraction of the 16:9 stage, independent of window size.
     offset: Vec2,
+    spin_enabled: bool,
 }
 
 #[derive(Default)]
@@ -53,6 +54,7 @@ struct ForegroundState {
     cued: Option<String>,
     live: Option<PlacedForeground>,
     offsets: HashMap<String, Vec2>,
+    spins: HashMap<String, bool>,
 }
 
 impl ForegroundState {
@@ -73,6 +75,7 @@ impl ForegroundState {
         if let Some(name) = self.cued.take() {
             self.live = Some(PlacedForeground {
                 offset: self.offsets.get(&name).copied().unwrap_or(Vec2::ZERO),
+                spin_enabled: self.spins.get(&name).copied().unwrap_or(true),
                 name,
             });
             self.selected = None;
@@ -95,6 +98,21 @@ impl ForegroundState {
         }
     }
 
+    fn cue_spin_enabled(&self) -> bool {
+        self.cued
+            .as_ref()
+            .and_then(|name| self.spins.get(name))
+            .copied()
+            .unwrap_or(true)
+    }
+
+    fn toggle_cue_spin(&mut self) {
+        if let Some(name) = &self.cued {
+            let enabled = self.spins.entry(name.clone()).or_insert(true);
+            *enabled = !*enabled;
+        }
+    }
+
     fn clear_selection(&mut self) {
         self.selected = None;
         self.cued = None;
@@ -110,15 +128,18 @@ mod foreground_tests {
         let mut state = ForegroundState::default();
         state.select_cue("first.png".into());
         state.move_cue(Vec2::new(0.2, 0.3));
+        state.toggle_cue_spin();
         assert!(state.live.is_none());
 
         state.toggle_play();
         let first_live = state.live.clone();
+        assert!(!first_live.as_ref().unwrap().spin_enabled);
         assert!(state.cued.is_none());
         assert!(state.selected.is_none());
         state.move_cue(Vec2::new(0.1, 0.1));
         assert_eq!(state.offsets["first.png"], Vec2::new(0.2, 0.3));
         state.select_cue("second.png".into());
+        assert!(state.cue_spin_enabled());
         state.toggle_cue();
         assert!(state.cued.is_none());
         assert_eq!(state.live, first_live);
@@ -128,6 +149,7 @@ mod foreground_tests {
 
         state.toggle_play();
         assert_eq!(state.live.as_ref().unwrap().name, "second.png");
+        assert!(state.live.as_ref().unwrap().spin_enabled);
         state.toggle_play();
         assert!(state.live.is_none());
     }
@@ -148,9 +170,13 @@ mod foreground_tests {
         assert!(state.cued.is_none());
         state.select_cue("first.png".into());
         assert_eq!(state.cue_offset(), Vec2::new(0.25, -0.2));
+        assert!(state.cue_spin_enabled());
+        state.toggle_cue_spin();
         state.toggle_cue();
         assert!(state.cued.is_none());
         assert_eq!(state.offsets["first.png"], Vec2::new(0.25, -0.2));
+        state.select_cue("first.png".into());
+        assert!(!state.cue_spin_enabled());
     }
 }
 
@@ -451,6 +477,7 @@ impl VjApp {
             self.foreground.cued.as_ref().map(|name| PlacedForeground {
                 name: name.clone(),
                 offset: self.foreground.cue_offset(),
+                spin_enabled: self.foreground.cue_spin_enabled(),
             })
         } else {
             self.foreground.live.clone()
@@ -518,7 +545,11 @@ impl VjApp {
         let phase = now.saturating_duration_since(self.started_at).as_secs_f32()
             * std::f32::consts::TAU
             / 3.0;
-        let horizontal_scale = phase.cos();
+        let horizontal_scale = if placed.spin_enabled {
+            phase.cos()
+        } else {
+            1.0
+        };
         let transform =
             |point: egui::Pos2| pos2(pivot.x + (point.x - pivot.x) * horizontal_scale, point.y);
         let positions = [
@@ -592,6 +623,21 @@ impl VjApp {
                 {
                     self.foreground.toggle_cue();
                 }
+                if ui
+                    .add_enabled(
+                        self.foreground.cued.is_some(),
+                        egui::Button::new(if self.foreground.cue_spin_enabled() {
+                            "Y SPIN ON"
+                        } else {
+                            "Y SPIN OFF"
+                        })
+                        .small(),
+                    )
+                    .on_hover_text("Y 軸回転を切り替える。PLAY 後の出力にも反映")
+                    .clicked()
+                {
+                    self.foreground.toggle_cue_spin();
+                }
             });
             if let Some(name) = &self.foreground.cued {
                 ui.label(
@@ -622,7 +668,7 @@ impl VjApp {
                     .add_enabled(
                         cue_active || live_active,
                         egui::Button::new(if !cue_active && live_active {
-                            "■ PLAY ON"
+                            "■ STOP"
                         } else {
                             "▶ PLAY"
                         })

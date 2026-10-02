@@ -99,7 +99,7 @@ Background は `background` 直下へ MP4 と `background-metadata.json` を置�
 
 Foreground は `foreground` 直下へ透過 PNG を置きます。画像サイズは任意で、透明でない部分の中心を軸に表示・反転します。子フォルダ内の PNG、完全に透明な PNG、読み込めない PNG は候補から除外されます。
 
-Foreground を選ぶとカードがミク色になり、同時に `CUE ON` として操作画面の STAGING に表示されます。STAGING 上でドラッグして位置を調整でき、CUE ボタンを押すとプレビューが消えます。この操作では STAGE ウィンドウの表示は変わりません。LIVE STAGE 欄の緑色の `PLAY` を押すと調整した素材と位置が出力され、CUE は OFF に戻ります。出力中はボタンが `PLAY ON` になり、もう一度押すと LIVE の Foreground が消えます。次の素材を選んだ場合は `PLAY` でそのまま切り替わります。STAGING と STAGE は同じ画面比率と素材サイズで Y 軸回転を表示します。素材ごとの CUE 位置はアプリの起動中保持されます。
+Foreground を選ぶとカードがミク色になり、同時に `CUE ON` として操作画面の STAGING に表示されます。STAGING 上でドラッグして位置を調整でき、`Y SPIN ON/OFF` で回転を切り替えられます。CUE ボタンを押すとプレビューが消えます。これらの操作では STAGE ウィンドウの表示は変わりません。LIVE STAGE 欄の緑色の `PLAY` を押すと調整した素材、位置、回転設定が出力され、CUE は OFF に戻ります。出力中はボタンが `STOP` になり、押すと LIVE の Foreground が消えます。次の素材を選んだ場合は `PLAY` でそのまま切り替わります。STAGING と STAGE は同じ画面比率と素材サイズで Y 軸回転を表示します。素材ごとの CUE 位置と回転設定はアプリの起動中保持されます。
 
 ## 5. 操作する
 
