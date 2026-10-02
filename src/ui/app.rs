@@ -64,13 +64,15 @@ impl ForegroundState {
         };
     }
 
-    fn take(&mut self) {
+    fn toggle_play(&mut self) {
         if let Some(name) = self.cued.take() {
             self.live = Some(PlacedForeground {
                 offset: self.offsets.get(&name).copied().unwrap_or(Vec2::ZERO),
                 name,
             });
             self.selected = None;
+        } else {
+            self.live = None;
         }
     }
 
@@ -103,7 +105,7 @@ mod foreground_tests {
         state.move_cue(Vec2::new(0.2, 0.3));
         assert!(state.live.is_none());
 
-        state.take();
+        state.toggle_play();
         let first_live = state.live.clone();
         assert!(state.cued.is_none());
         assert!(state.selected.is_none());
@@ -113,14 +115,15 @@ mod foreground_tests {
         state.toggle_cue();
         state.toggle_cue();
         assert!(state.cued.is_none());
-        state.take();
         assert_eq!(state.live, first_live);
         state.toggle_cue();
         state.move_cue(Vec2::new(-0.1, 0.4));
         assert_eq!(state.live, first_live);
 
-        state.take();
-        assert_eq!(state.live.unwrap().name, "second.png");
+        state.toggle_play();
+        assert_eq!(state.live.as_ref().unwrap().name, "second.png");
+        state.toggle_play();
+        assert!(state.live.is_none());
     }
 
     #[test]
@@ -131,8 +134,8 @@ mod foreground_tests {
         };
         state.toggle_cue();
         state.move_cue(Vec2::new(0.25, -0.2));
-        state.take();
-        state.live = None;
+        state.toggle_play();
+        state.toggle_play();
         assert!(state.cued.is_none());
         assert_eq!(state.offsets["first.png"], Vec2::new(0.25, -0.2));
 
@@ -624,25 +627,35 @@ impl VjApp {
                 }
             });
             ui.horizontal(|ui| {
+                let cue_active = self.foreground.cued.is_some();
+                let live_active = self.foreground.live.is_some();
                 if ui
                     .add_enabled(
-                        self.foreground.cued.is_some(),
-                        egui::Button::new("▶ PLAY").min_size(Vec2::new(82.0, 30.0)),
+                        cue_active || live_active,
+                        egui::Button::new(if cue_active {
+                            "▶ PLAY CUE"
+                        } else if live_active {
+                            "■ PLAY ON"
+                        } else {
+                            "▶ PLAY"
+                        })
+                        .min_size(Vec2::new(104.0, 30.0))
+                        .fill(if cue_active {
+                            theme::AMBER.gamma_multiply(0.25)
+                        } else if live_active {
+                            theme::ACCENT.gamma_multiply(0.25)
+                        } else {
+                            theme::PANEL
+                        }),
                     )
-                    .on_hover_text("STAGING の素材と位置を LIVE STAGE に出す")
+                    .on_hover_text(if cue_active {
+                        "STAGING の素材と位置を LIVE STAGE に出す"
+                    } else {
+                        "LIVE STAGE の Foreground を消す"
+                    })
                     .clicked()
                 {
-                    self.foreground.take();
-                }
-                if ui
-                    .add_enabled(
-                        self.foreground.live.is_some(),
-                        egui::Button::new("× CLEAR LIVE").small(),
-                    )
-                    .on_hover_text("LIVE STAGE の Foreground だけを消す")
-                    .clicked()
-                {
-                    self.foreground.live = None;
+                    self.foreground.toggle_play();
                 }
             });
         });

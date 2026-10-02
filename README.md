@@ -99,7 +99,7 @@ Background は `background` 直下へ MP4 と `background-metadata.json` を置�
 
 Foreground は `foreground` 直下へ透過 PNG を置きます。画像サイズは任意で、透明でない部分の中心を軸に表示・反転します。子フォルダ内の PNG、完全に透明な PNG、読み込めない PNG は候補から除外されます。
 
-Foreground を選び、`CUE` を押すと操作画面の STAGING に表示されます。`CUE ON` の間は STAGING 上でドラッグして位置を調整でき、もう一度 CUE を押すとプレビューが消えます。この操作では STAGE ウィンドウの表示は変わりません。LIVE STAGE 欄の `PLAY` を押すと調整した素材と位置が出力され、CUE は OFF に戻ります。STAGING と STAGE は同じ画面比率と素材サイズで Y 軸回転を表示します。素材ごとの CUE 位置はアプリの起動中保持されます。`CLEAR LIVE` は出力中の Foreground だけを消します。
+Foreground を選び、`CUE` を押すと操作画面の STAGING に表示されます。`CUE ON` の間は STAGING 上でドラッグして位置を調整でき、もう一度 CUE を押すとプレビューが消えます。この操作では STAGE ウィンドウの表示は変わりません。LIVE STAGE 欄の `PLAY CUE` を押すと調整した素材と位置が出力され、CUE は OFF に戻ります。出力中はボタンが `PLAY ON` になり、もう一度押すと LIVE の Foreground が消えます。次の素材を CUE した場合は `PLAY CUE` でそのまま切り替わります。STAGING と STAGE は同じ画面比率と素材サイズで Y 軸回転を表示します。素材ごとの CUE 位置はアプリの起動中保持されます。
 
 ## 5. 操作する
 
