@@ -33,6 +33,74 @@ use crate::infra::audio_input::AudioBackend;
 const THUMBNAIL_SIZE: Vec2 = Vec2::new(112.0, 63.0);
 const STAGE_PREVIEW_WIDTH: f32 = 960.0;
 const SCROLL_CONTENT_RIGHT_MARGIN: f32 = 20.0;
+const STAGE_WINDOW_GAP: f32 = 12.0;
+const WINDOW_EDGE_MARGIN: f32 = 8.0;
+const WINDOW_FRAME_ALLOWANCE: f32 = 20.0;
+
+#[derive(Clone, Copy)]
+struct StageWindowLayout {
+    position: egui::Pos2,
+    size: Vec2,
+}
+
+impl StageWindowLayout {
+    fn beside(control: Rect, monitor: Vec2) -> Self {
+        let right_x = control.right() + STAGE_WINDOW_GAP;
+        let right_width = monitor.x - right_x - WINDOW_EDGE_MARGIN - WINDOW_FRAME_ALLOWANCE;
+        if right_width >= 320.0 {
+            let width = right_width.min(STAGE_PREVIEW_WIDTH);
+            return Self {
+                position: pos2(right_x, control.top().max(WINDOW_EDGE_MARGIN)),
+                size: Vec2::new(width, width * 9.0 / 16.0),
+            };
+        }
+
+        let below_y = control.bottom() + STAGE_WINDOW_GAP;
+        let below_height = monitor.y - below_y - WINDOW_EDGE_MARGIN - WINDOW_FRAME_ALLOWANCE;
+        let below_width = (below_height * 16.0 / 9.0)
+            .min(monitor.x - 2.0 * WINDOW_EDGE_MARGIN - WINDOW_FRAME_ALLOWANCE)
+            .min(STAGE_PREVIEW_WIDTH);
+        if below_width >= 320.0 {
+            return Self {
+                position: pos2(WINDOW_EDGE_MARGIN, below_y),
+                size: Vec2::new(below_width, below_width * 9.0 / 16.0),
+            };
+        }
+
+        // Both minimum-sized windows cannot fit without overlap on this monitor.
+        Self {
+            position: pos2(
+                (monitor.x - 320.0 - WINDOW_FRAME_ALLOWANCE - WINDOW_EDGE_MARGIN).max(0.0),
+                control.top().max(0.0),
+            ),
+            size: Vec2::new(320.0, 180.0),
+        }
+    }
+}
+
+#[cfg(test)]
+mod stage_window_tests {
+    use super::*;
+
+    #[test]
+    fn places_stage_beside_controls_at_desktop_and_laptop_widths() {
+        let control = Rect::from_min_size(pos2(8.0, 16.0), Vec2::new(656.0, 840.0));
+        for monitor_width in [1920.0, 1366.0] {
+            let stage = StageWindowLayout::beside(control, Vec2::new(monitor_width, 1080.0));
+            assert!(stage.position.x >= control.right() + STAGE_WINDOW_GAP);
+            assert!(stage.position.x + stage.size.x + WINDOW_FRAME_ALLOWANCE <= monitor_width);
+            assert!((stage.size.x / stage.size.y - 16.0 / 9.0).abs() < 0.001);
+        }
+    }
+
+    #[test]
+    fn places_stage_below_controls_on_a_narrow_tall_monitor() {
+        let control = Rect::from_min_size(pos2(8.0, 16.0), Vec2::new(656.0, 840.0));
+        let stage = StageWindowLayout::beside(control, Vec2::new(900.0, 1600.0));
+        assert!(stage.position.y >= control.bottom() + STAGE_WINDOW_GAP);
+        assert!(stage.position.y + stage.size.y + WINDOW_FRAME_ALLOWANCE <= 1600.0);
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum MediaTab {
@@ -211,6 +279,7 @@ pub struct VjApp {
     foreground: ForegroundState,
     media_tab: MediaTab,
     preview_window_open: bool,
+    stage_window_layout: Option<StageWindowLayout>,
     stage_texture: Option<TextureHandle>,
     foreground_preview_textures: HashMap<String, TextureHandle>,
     started_at: Instant,
@@ -246,6 +315,7 @@ impl VjApp {
             foreground: ForegroundState::default(),
             media_tab: MediaTab::Background,
             preview_window_open: true,
+            stage_window_layout: None,
             stage_texture: None,
             foreground_preview_textures: HashMap::new(),
             started_at: now,
@@ -804,11 +874,25 @@ impl VjApp {
             return;
         }
 
+        if self.stage_window_layout.is_none() {
+            self.stage_window_layout = context.input(|input| {
+                let viewport = input.viewport();
+                Some(StageWindowLayout::beside(
+                    viewport.outer_rect?,
+                    viewport.monitor_size?,
+                ))
+            });
+        }
+        let layout = self.stage_window_layout.unwrap_or(StageWindowLayout {
+            position: pos2(680.0, 16.0),
+            size: Vec2::new(960.0, 540.0),
+        });
         let viewport_id = ViewportId::from_hash_of("vj-copilot-stage-preview");
         let viewport_builder = ViewportBuilder::default()
             .with_title("VJ Copilot - STAGE")
-            .with_inner_size([960.0, 540.0])
+            .with_inner_size(layout.size)
             .with_min_inner_size([320.0, 180.0])
+            .with_position(layout.position)
             .with_icon(std::sync::Arc::new(app_icon::app_icon()));
         let mut open = true;
         context.show_viewport_immediate(viewport_id, viewport_builder, |viewport_context, _| {
