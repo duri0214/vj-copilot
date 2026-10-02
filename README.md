@@ -28,7 +28,7 @@ ffmpeg -version
 .\scripts\generate-background-metadata.ps1
 ```
 
-同梱の `demo-media\foreground\neon-prism-right.png` と合わせて、Background と Foreground の表示をすぐに試せます。生成した MP4 は Git 管理外です。別のフォルダへ生成する場合は `-OutputDir` を指定します。
+同梱の Foreground 2 点（`neon-orbit-left.png` と `neon-prism-right.png`）と合わせて、Background と Foreground の表示・素材切り替えをすぐに試せます。生成した MP4 は Git 管理外です。別のフォルダへ生成する場合は `-OutputDir` を指定します。
 
 ## 3. 起動する
 
@@ -97,19 +97,20 @@ Background は `background` 直下へ MP4 と `background-metadata.json` を置�
 
 ### Foreground
 
-Foreground は `foreground` 直下へ透過 PNG を置きます。画像サイズは任意で、透明でない部分の中心を軸に表示・反転します。STAGE 上で Foreground をドラッグすると位置を調整できます。子フォルダ内の PNG、完全に透明な PNG、読み込めない PNG は候補から除外されます。
+Foreground は `foreground` 直下へ透過 PNG を置きます。画像サイズは任意で、透明でない部分の中心を軸に表示・反転します。子フォルダ内の PNG、完全に透明な PNG、読み込めない PNG は候補から除外されます。
 
-STAGE には Foreground を 1 枚だけ表示できます。別の画像を選ぶと置き換わり、`CLEAR` で Background だけの表示へ戻ります。
+Foreground を選ぶとカードがミク色になり、同時に操作画面の STAGING に表示されます。同じカードをもう一度クリックするとプレビューが消えます。Foreground タブまたは STAGE ウィンドウで `Space` を押すと、プレビュー中・出力中の Foreground をどちらも解除します。Background の映像には影響しません。STAGING 上でドラッグして位置を調整でき、`Y SPIN ON/OFF` で回転を切り替えられます。Y SPIN が ON のときはボタンがミク色になります。位置調整と Y SPIN の切り替えだけでは STAGE ウィンドウの表示は変わりません。STAGING 欄の紺色の `PLAY` を押すと調整した素材、位置、回転設定が出力されます。調整が終わると STAGING プレビューと Y SPIN は隠れ、ミク色の `STOP` だけが残ります。出力中の素材カードはミク色のままで、`STOP` を押すと STAGE の Foreground が消え、カードの強調も解除されます。次の素材を選んだ場合は STAGING が再び表示され、`PLAY` でそのまま切り替わります。STAGING と STAGE は同じ画面比率と素材サイズで Y 軸回転を表示します。素材ごとの位置と回転設定はアプリの起動中保持されます。
 
 ## 5. 操作する
 
 通常起動では、入力の種類を `PC 再生音` または `LINE / MIC` から選び、デバイスを指定して `開始` を押します。デバイスを変更するときは、先に入力を停止してください。
 
 - Background 候補をクリックするか、`1`〜`4` キーで選択します。選択中は候補の自動更新が止まります。
-- `Space` で Background の選択を解除し、候補の自動更新を再開します。
-- Foreground 候補をクリックして選択し、`CLEAR` で解除します。
+- `Space` は操作画面で開いているタブにだけ作用します。Background タブでは背景の選択を解除して候補の自動更新を再開し、Foreground タブではフロントのプレビューと出力を解除します。STAGE ウィンドウではフロントだけを解除します。
+- Foreground 候補をクリックするか `1`〜`4` キーでプレビューに読み込み、位置調整 → `PLAY` の順に操作します。同じ候補の再選択でプレビューだけを解除します。
 - STAGE ウィンドウを閉じた場合は、操作画面の `OPEN STAGE WINDOW` から再表示できます。
 - STAGE ウィンドウはプロジェクタやサブディスプレイへ移動できます。
+- 起動時は操作画面の右側に STAGE ウィンドウを並べます。横幅が足りない場合は下側の空きを使います。
 
 PC で再生中の音を使う場合は、音楽を出している Windows の出力先と、アプリの `PC 再生音` で選ぶデバイスを合わせます。`LINE / MIC` は録音入力を使う場合に選びます。
 
