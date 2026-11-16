@@ -11,6 +11,7 @@
 - GitHub の Issue、Project、PR、レビューコメントの操作には `gh` CLI を使う。
 - ルールやスキル自体を変更するときも、通常の Issue、ブランチ、確認、コミット、PR の流れに従う。
 - 新規またはまっさらなスレッドにこのリポジトリの GitHub Issue URL が貼られた場合は、その Issue を対応対象として扱い、追加確認なしで内容確認、ブランチ作成、Project の `In progress` 更新、作業着手まで進める。
+- 1つのスレッドで実装する対象 Issue は1件に限る。別 Issue に属する作業が見つかった場合、そのスレッドでは実装せず、必要なら起票または既存 Issue への追記までに留め、実装は別スレッドで行う。
 - コード、ルール、ドキュメントを変更する依頼では、確認後に commit、push、PR作成または更新まで進める。ユーザーが `commit不要`、`push不要`、`PR不要`、`まだコミットしない` と明示した場合だけ停止する。
 - 説明、調査、レビュー結果の報告、状態確認だけを求められた場合は、変更や commit、push、PR作成を行わない。
 
@@ -19,6 +20,7 @@
 - 常に適用する設計・運用方針: `.codex/rules/principles.md`、`.codex/rules/project.md`、`.codex/rules/ddd.md`
 - Rust のコード: `.codex/rules/rust.md`
 - Rust のテスト: `.codex/rules/testing.md`
+- GUI の設計・実装・目検: `.codex/rules/ui.md`
 
 ## スキルの使い分け
 
@@ -63,7 +65,12 @@
 3. `git diff --stat origin/<base>..HEAD`、`git diff --name-status origin/<base>..HEAD` でPRの差分を確認する。
 4. PR本文は日本語で、概要、主な変更点、目検手順、自動テストの範囲、`Closes #<Issue番号>` を含める。
 5. 目検手順は操作と期待値を `- [ ]` 形式で書く。実行していない確認を `[x]` にしない。
+   - UI変更では、初めて使う人が確認できるよう、必要な素材・設定・開始状態、画面上の正確なラベルと入力値、操作順、結果が表示される場所と期待内容を記す。
    - 同じ前提・入力・処理を複数項目で繰り返さず、1回の操作結果を後続の確認で再利用する。別の初期状態や入力経路の確認に必要な再実行だけを残し、各項目の合否条件と受け入れ条件を重複なく網羅する。
+   - PR を更新するときは既存の `[x]` を `[ ]` に戻さない。新たに必要になった未実施確認は別の `[ ]` として追加する。
 6. `gh pr create --base <base> --head <current-branch> --title "#<Issue番号> <Issueタイトル>" --body-file <body-file>` で作成し、作成後に URL、assignee、ラベル、Project を確認する。変更依頼に対しては、明示的な `PR不要` 指定がない限り作成または更新まで進める。
+7. PR に対応 Issue の assignee と、その Issue に付いていて対象リポジトリで利用できるラベルを追加する (`gh pr edit --add-assignee`、`--add-label`)。既存の PR 設定は残し、不足している値だけを追加する。Issue に情報がない場合は推測で設定せず、その旨を報告する。
+8. Issue が所属する Project を確認し、同じ Project に PR を追加する (`gh project item-add`)。既に PR が登録されていれば重複追加しない。Project の Status は実際に存在する選択肢から作業状態に合うものを確認・設定する (`gh project item-edit`)。実装中は `In progress` とし、レビュー依頼後の専用状態があればそれを使う。専用状態がなければ作業中の状態を維持し、その旨を報告する。Project や Status 項目がない場合、または権限不足で設定できない場合も報告する。
+9. 作成・更新後に PR の assignee、ラベル、Project 所属と Status を確認する。Issue に情報がない場合や設定できなかった項目は、PR または作業結果で明示する。
 
 git や gh の操作が失敗した場合は、API で迂回せず原因を切り分けて報告する。Project 操作の権限が不足する場合は、`gh auth refresh -s read:project -s project` が必要であることを伝える。
